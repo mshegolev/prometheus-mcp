@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+prometheus-mcp evaluation suite (10 read-only QA pairs).
+
+Per mcp-builder Phase 4 spec. Answers are PLACEHOLDER because this MCP wraps
+a customer-owned external service without a shared fixture. See EVALUATION.md
+for how to fill in answers against a live Prometheus instance.
+-->
+<evaluation>
+  <qa_pair>
+    <question>How many distinct metric names does Prometheus know about in total? Use prometheus_list_metrics without any pattern filter. Respond with an integer.</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>How many metric names contain the substring "http" (case-insensitive)? Use prometheus_list_metrics with pattern="http". Respond with an integer.</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>What is the current value of the "up" metric for the Prometheus instance itself (job="prometheus")? Use prometheus_query with query='up{job="prometheus"}'. Respond with "1" (up) or "0" (down).</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>How many time series are returned by the instant query 'up'? Use prometheus_query with query="up". Respond with an integer (the result_count).</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>For the range query 'up' over the last 1 hour with step='5m', how many series are returned? Use prometheus_query_range with appropriate start/end and step="5m". Respond with an integer (series_count).</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>What is the total number of active scrape targets? Use prometheus_list_targets with state="active". Respond with an integer (total_count).</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>How many scrape targets are currently in "down" state? Use prometheus_list_targets with state="active". Respond with an integer (down_count).</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>How many distinct jobs appear in the job_summary of prometheus_list_targets? Respond with an integer.</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>How many alerts are currently in "firing" state? Use prometheus_list_alerts. Respond with an integer (firing_count).</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>What is the alertname of the first firing alert (alphabetically by alertname)? Use prometheus_list_alerts and sort by alertname. If there are no firing alerts, respond with "none". Respond with the alertname string.</question>
+    <answer>__VERIFY_ON_INSTANCE__</answer>
+  </qa_pair>
+</evaluation>

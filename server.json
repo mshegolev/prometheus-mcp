@@ -1,0 +1,55 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mshegolev/prometheus-mcp",
+  "description": "Prometheus MCP — query metrics, inspect alerts, and explore scrape targets (read-only).",
+  "repository": {
+    "url": "https://github.com/mshegolev/prometheus-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "prometheus-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PROMETHEUS_URL",
+          "description": "Prometheus server URL, e.g. https://prometheus.example.com (no trailing slash)",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "PROMETHEUS_TOKEN",
+          "description": "Bearer token for authentication. Takes priority over Basic auth.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "PROMETHEUS_USERNAME",
+          "description": "HTTP Basic auth username. Used only when PROMETHEUS_TOKEN is not set.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "PROMETHEUS_PASSWORD",
+          "description": "HTTP Basic auth password.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "PROMETHEUS_SSL_VERIFY",
+          "description": "Verify SSL certificates (true/false). Set to 'false' for self-signed certs.",
+          "isRequired": false,
+          "format": "string",
+          "default": "true"
+        }
+      ]
+    }
+  ]
+}
