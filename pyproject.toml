@@ -7,7 +7,7 @@ name = "prometheus-mcp"
 version = "0.1.0"
 description = "MCP server for Prometheus — query metrics, inspect alerts, and explore scrape targets (read-only)."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "Mikhail Shchegolev" },
