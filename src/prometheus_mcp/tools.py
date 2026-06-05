@@ -26,13 +26,19 @@ from prometheus_mcp._mcp import get_client, mcp
 from prometheus_mcp.models import (
     AlertItem,
     AlertStateSummary,
+    GetMetricMetadataOutput,
     InstantSample,
     ListAlertsOutput,
+    ListLabelValuesOutput,
     ListMetricsOutput,
+    ListRulesOutput,
     ListTargetsOutput,
+    MetadataEntry,
     QueryOutput,
     QueryRangeOutput,
     RangeSeries,
+    RuleGroupItem,
+    RuleItem,
     TargetItem,
     TargetJobSummary,
 )
@@ -691,3 +697,359 @@ def prometheus_list_targets(
         return output.ok(result, md)  # type: ignore[return-value]
     except Exception as exc:
         output.fail(exc, f"listing Prometheus targets (state={state!r})")
+
+
+# ── Investigation Tools ───────────────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="prometheus_get_metric_metadata",
+    annotations={
+        "title": "Get Metric Metadata",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def prometheus_get_metric_metadata(
+    metric: Annotated[
+        str | None,
+        Field(
+            default=None,
+            max_length=200,
+            description=(
+                "Optional metric name to filter metadata. "
+                "Example: 'http_requests_total' returns metadata only for that metric. "
+                "Leave empty to list metadata for all metrics (capped at 500)."
+            ),
+        ),
+    ] = None,
+) -> GetMetricMetadataOutput:
+    """Get metric metadata (HELP text, TYPE, UNIT) from Prometheus.
+
+    Wraps ``GET /api/v1/metadata``. Returns the metadata that Prometheus
+    scraped from ``HELP``, ``TYPE``, and ``UNIT`` lines in the exposition
+    format. Each metric may have multiple metadata entries if different
+    scrape targets expose different help strings.
+
+    Use this to understand what a metric measures, its type (counter, gauge,
+    histogram, summary), and unit — essential for writing correct PromQL.
+    For example, knowing a metric is a counter means you should use ``rate()``
+    or ``increase()``; a gauge can be used directly.
+
+    Examples:
+        - Use when: "What does http_requests_total measure?"
+          → ``metric='http_requests_total'``; read ``help`` and ``type``.
+        - Use when: "Show me all histogram metrics"
+          → call with no filter; filter results where ``type='histogram'``.
+        - Use when: Starting an investigation — check metric types before
+          writing PromQL to avoid using rate() on a gauge.
+        - Don't use when: You already know the metric type and want to
+          query values (call ``prometheus_query`` directly).
+
+    Returns:
+        dict with ``metric`` / ``total_count`` / ``returned_count`` /
+        ``truncated`` / ``metadata`` (dict of metric name → list of
+        ``{type, help, unit}``).
+    """
+    try:
+        client = get_client()
+        params: dict[str, Any] = {}
+        if metric is not None:
+            params["metric"] = metric
+
+        raw = client.get("/metadata", params=params) or {}
+        raw_data: dict[str, list[dict[str, Any]]] = raw.get("data") or {}
+
+        total_count = len(raw_data)
+        truncated = total_count > _METRICS_CAP
+
+        # Sort and cap
+        sorted_names = sorted(raw_data.keys())[:_METRICS_CAP]
+        metadata: dict[str, list[MetadataEntry]] = {}
+        for name in sorted_names:
+            entries = raw_data.get(name) or []
+            metadata[name] = [
+                {
+                    "type": str(e.get("type", "")),
+                    "help": str(e.get("help", "")),
+                    "unit": str(e.get("unit", "")),
+                }
+                for e in entries
+            ]
+
+        result: GetMetricMetadataOutput = {
+            "metric": metric,
+            "total_count": total_count,
+            "returned_count": len(metadata),
+            "truncated": truncated,
+            "metadata": metadata,
+        }
+
+        suffix = " — truncated at 500" if truncated else ""
+        header = f"## Metric Metadata ({len(metadata)} metrics{suffix})"
+        if metric:
+            header += f" for `{metric}`"
+        md = header + "\n\n"
+
+        md_names = sorted_names[:_MD_ITEM_LIMIT]
+        md += "| Metric | Type | Help |\n|--------|------|------|\n"
+        for name in md_names:
+            entries = metadata.get(name) or [{"type": "", "help": "", "unit": ""}]
+            entry = entries[0]
+            help_text = entry["help"][:80] + "..." if len(entry["help"]) > 80 else entry["help"]
+            md += f"| `{name}` | {entry['type']} | {help_text} |\n"
+        if len(sorted_names) > _MD_ITEM_LIMIT:
+            md += _truncation_hint(len(sorted_names), _MD_ITEM_LIMIT, "metrics")
+
+        return output.ok(result, md)  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, "fetching metric metadata")
+
+
+@mcp.tool(
+    name="prometheus_list_label_values",
+    annotations={
+        "title": "List Label Values",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def prometheus_list_label_values(
+    label: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=200,
+            description=(
+                "Label name to retrieve values for. "
+                "Examples: 'job' (list all job names), 'instance' (list all instances), "
+                "'__name__' (list all metric names — same as prometheus_list_metrics)."
+            ),
+        ),
+    ],
+    match: Annotated[
+        str | None,
+        Field(
+            default=None,
+            max_length=2000,
+            description=(
+                "Optional series selector to restrict which series the label values come from. "
+                "Example: 'up' returns label values only from the 'up' metric. "
+                "Example: '{job=\"node\"}' returns label values only from the node job. "
+                "Leave empty to get values across all series."
+            ),
+        ),
+    ] = None,
+) -> ListLabelValuesOutput:
+    """List all values for a specific label from Prometheus.
+
+    Wraps ``GET /api/v1/label/{label_name}/values``. Returns all distinct
+    values for the named label across all time series, optionally filtered
+    by a series selector.
+
+    Use this to discover what entities exist for a given label dimension —
+    for example, which jobs are running, which instances are scraped, or
+    which namespaces have metrics. This is essential for building targeted
+    PromQL queries during investigation.
+
+    Examples:
+        - Use when: "What jobs does Prometheus scrape?"
+          → ``label='job'``; read the ``values`` list.
+        - Use when: "What instances are in the 'node-exporter' job?"
+          → ``label='instance'``, ``match='{job="node-exporter"}'``.
+        - Use when: "What namespaces have metrics?"
+          → ``label='namespace'``.
+        - Don't use when: You want metric names
+          (call ``prometheus_list_metrics`` — has substring filtering).
+        - Don't use when: You want current metric values
+          (call ``prometheus_query`` with a PromQL expression).
+
+    Returns:
+        dict with ``label`` / ``match`` / ``total_count`` /
+        ``returned_count`` / ``truncated`` / ``values`` (sorted list).
+    """
+    try:
+        client = get_client()
+        params: dict[str, Any] = {}
+        if match is not None:
+            params["match[]"] = match
+
+        raw = client.get(f"/label/{label}/values", params=params) or {}
+        raw_values: list[str] = raw.get("data") or []
+
+        total_count = len(raw_values)
+        truncated = total_count > _METRICS_CAP
+        values = sorted(raw_values[:_METRICS_CAP])
+
+        result: ListLabelValuesOutput = {
+            "label": label,
+            "match": match,
+            "total_count": total_count,
+            "returned_count": len(values),
+            "truncated": truncated,
+            "values": values,
+        }
+
+        suffix = " — truncated at 500" if truncated else ""
+        header = f"## Label Values for `{label}` ({len(values)} values{suffix})"
+        if match:
+            header += f" matching `{match}`"
+        md = header + "\n\n"
+        md_values = values[:_MD_ITEM_LIMIT]
+        md += "\n".join(f"- `{v}`" for v in md_values)
+        if len(values) > _MD_ITEM_LIMIT:
+            md += _truncation_hint(len(values), _MD_ITEM_LIMIT, "values")
+
+        return output.ok(result, md)  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"listing label values for {label!r}")
+
+
+@mcp.tool(
+    name="prometheus_list_rules",
+    annotations={
+        "title": "List Rules",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def prometheus_list_rules(
+    type: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Optional filter by rule type: 'alert' for alerting rules only, "
+                "'record' for recording rules only. Leave empty for both types."
+            ),
+        ),
+    ] = None,
+) -> ListRulesOutput:
+    """List recording and alerting rules from Prometheus.
+
+    Wraps ``GET /api/v1/rules``. Returns rule groups with their rules,
+    including the PromQL expression, rule type (recording or alerting),
+    and for alerting rules their current state (firing/pending/inactive).
+
+    Use this to understand the alerting configuration, find recording
+    rules that pre-compute useful aggregations, and investigate which
+    rules are currently firing or have health issues.
+
+    Examples:
+        - Use when: "What alerting rules are configured?"
+          → ``type='alert'``; inspect rule names and expressions.
+        - Use when: "Are there any recording rules I can use instead of
+          computing aggregations from scratch?"
+          → ``type='record'``; look for rules matching your investigation.
+        - Use when: "Why is this alert firing? What's its PromQL expression?"
+          → call with no filter; find the alert by name; read its ``query``.
+        - Don't use when: You want to see which alerts are currently
+          firing (call ``prometheus_list_alerts`` — shows active alerts with
+          state and value, without the PromQL definition).
+
+    Returns:
+        dict with ``type_filter`` / ``total_groups`` / ``total_rules`` /
+        ``recording_count`` / ``alerting_count`` / ``groups`` (list of
+        rule groups with ``name``, ``file``, ``rule_count``, ``rules``).
+    """
+    try:
+        if type is not None and type not in ("alert", "record"):
+            raise ValueError(
+                f"type must be 'alert', 'record', or empty (got: {type!r}). "
+                "Use 'alert' for alerting rules, 'record' for recording rules, "
+                "or leave empty for both."
+            )
+
+        client = get_client()
+        params: dict[str, Any] = {}
+        if type is not None:
+            params["type"] = type
+
+        raw = client.get("/rules", params=params) or {}
+        raw_data = raw.get("data") or {}
+        raw_groups: list[dict[str, Any]] = raw_data.get("groups") or []
+
+        groups: list[RuleGroupItem] = []
+        total_rules = 0
+        recording_count = 0
+        alerting_count = 0
+
+        for g in raw_groups:
+            raw_rules: list[dict[str, Any]] = g.get("rules") or []
+            rules: list[RuleItem] = []
+            for r in raw_rules:
+                rule_type = str(r.get("type", ""))
+                rule_state = r.get("state")
+                if rule_state is not None:
+                    rule_state = str(rule_state)
+                rule_health = r.get("health")
+                if rule_health is not None:
+                    rule_health = str(rule_health)
+                rules.append(
+                    {
+                        "name": str(r.get("name", "")),
+                        "query": str(r.get("query", r.get("expr", ""))),
+                        "type": rule_type,
+                        "state": rule_state,
+                        "labels": {k: str(v) for k, v in (r.get("labels") or {}).items()},
+                        "health": rule_health,
+                    }
+                )
+                if rule_type == "recording":
+                    recording_count += 1
+                elif rule_type == "alerting":
+                    alerting_count += 1
+                total_rules += 1
+
+            groups.append(
+                {
+                    "name": str(g.get("name", "")),
+                    "file": str(g.get("file", "")),
+                    "rule_count": len(rules),
+                    "rules": rules,
+                }
+            )
+
+        result: ListRulesOutput = {
+            "type_filter": type,
+            "total_groups": len(groups),
+            "total_rules": total_rules,
+            "recording_count": recording_count,
+            "alerting_count": alerting_count,
+            "groups": groups,
+        }
+
+        type_str = f" ({type})" if type else ""
+        md = f"## Prometheus Rules{type_str}\n\n"
+        md += f"**Groups:** {len(groups)} | **Rules:** {total_rules}"
+        md += f" ({recording_count} recording, {alerting_count} alerting)\n\n"
+
+        if not groups:
+            md += "_No rules found._\n"
+        else:
+            md_groups = groups[:_MD_ITEM_LIMIT]
+            for g in md_groups:
+                md += f"### {g['name']}\n"
+                md += f"_File: {g['file']}_ | {g['rule_count']} rules\n\n"
+                md_rules = g["rules"][:_MD_ITEM_LIMIT]
+                for r in md_rules:
+                    state_str = f" [{r['state']}]" if r["state"] else ""
+                    md += f"- **{r['name']}** ({r['type']}){state_str} — `{r['query'][:60]}`\n"
+                if len(g["rules"]) > _MD_ITEM_LIMIT:
+                    md += _truncation_hint(len(g["rules"]), _MD_ITEM_LIMIT, "rules")
+                md += "\n"
+            if len(groups) > _MD_ITEM_LIMIT:
+                md += _truncation_hint(len(groups), _MD_ITEM_LIMIT, "groups")
+
+        return output.ok(result, md)  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"listing Prometheus rules (type={type!r})")

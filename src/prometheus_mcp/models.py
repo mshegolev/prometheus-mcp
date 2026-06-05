@@ -123,3 +123,60 @@ class ListTargetsOutput(TypedDict):
     unknown_count: int
     job_summary: list[TargetJobSummary]
     targets: list[TargetItem]
+
+
+# ── Metric metadata ──────────────────────────────────────────────────────────
+
+
+class MetadataEntry(TypedDict):
+    type: str
+    help: str
+    unit: str
+
+
+class GetMetricMetadataOutput(TypedDict):
+    metric: str | None
+    total_count: int
+    returned_count: int
+    truncated: bool
+    metadata: dict[str, list[MetadataEntry]]
+
+
+# ── Label values ─────────────────────────────────────────────────────────────
+
+
+class ListLabelValuesOutput(TypedDict):
+    label: str
+    match: str | None
+    total_count: int
+    returned_count: int
+    truncated: bool
+    values: list[str]
+
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+
+class RuleItem(TypedDict):
+    name: str
+    query: str
+    type: str
+    state: str | None
+    labels: dict[str, str]
+    health: str | None
+
+
+class RuleGroupItem(TypedDict):
+    name: str
+    file: str
+    rule_count: int
+    rules: list[RuleItem]
+
+
+class ListRulesOutput(TypedDict):
+    type_filter: str | None
+    total_groups: int
+    total_rules: int
+    recording_count: int
+    alerting_count: int
+    groups: list[RuleGroupItem]

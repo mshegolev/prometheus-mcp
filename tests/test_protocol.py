@@ -57,6 +57,27 @@ EXPECTED_TOOLS: dict[str, dict[str, Any]] = {
         "required_params": set(),
         "optional_params": {"state"},
     },
+    "prometheus_get_metric_metadata": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": {"metric"},
+    },
+    "prometheus_list_label_values": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": {"label"},
+        "optional_params": {"match"},
+    },
+    "prometheus_list_rules": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": {"type"},
+    },
 }
 
 
@@ -66,7 +87,7 @@ def listed_tools() -> list[Any]:
     return asyncio.run(mcp.list_tools())
 
 
-def test_all_five_tools_registered(listed_tools: list[Any]) -> None:
+def test_all_eight_tools_registered(listed_tools: list[Any]) -> None:
     names = {t.name for t in listed_tools}
     assert names == set(EXPECTED_TOOLS), (
         f"tool list mismatch.\n  registered: {sorted(names)}\n  expected:   {sorted(EXPECTED_TOOLS)}"
@@ -195,3 +216,41 @@ def test_list_targets_output_schema_has_job_summary(listed_tools: list[Any]) -> 
     tool = next(t for t in listed_tools if t.name == "prometheus_list_targets")
     props = tool.outputSchema.get("properties", {})
     assert "job_summary" in props
+
+
+# ── New investigation tool schema tests ───────────────────────────────────────
+
+
+def test_metadata_output_schema_has_metadata_field(listed_tools: list[Any]) -> None:
+    """Output schema for get_metric_metadata must include 'metadata' field."""
+    tool = next(t for t in listed_tools if t.name == "prometheus_get_metric_metadata")
+    props = tool.outputSchema.get("properties", {})
+    assert "metadata" in props
+
+
+def test_label_values_output_schema_has_values_field(listed_tools: list[Any]) -> None:
+    """Output schema for list_label_values must include 'values' field."""
+    tool = next(t for t in listed_tools if t.name == "prometheus_list_label_values")
+    props = tool.outputSchema.get("properties", {})
+    assert "values" in props
+
+
+def test_label_values_label_is_required(listed_tools: list[Any]) -> None:
+    """label param in prometheus_list_label_values must be required."""
+    tool = next(t for t in listed_tools if t.name == "prometheus_list_label_values")
+    schema = tool.inputSchema
+    assert "label" in schema.get("required", [])
+
+
+def test_rules_output_schema_has_groups_field(listed_tools: list[Any]) -> None:
+    """Output schema for list_rules must include 'groups' field."""
+    tool = next(t for t in listed_tools if t.name == "prometheus_list_rules")
+    props = tool.outputSchema.get("properties", {})
+    assert "groups" in props
+
+
+def test_rules_type_param_is_optional(listed_tools: list[Any]) -> None:
+    """type param in prometheus_list_rules must not be required."""
+    tool = next(t for t in listed_tools if t.name == "prometheus_list_rules")
+    schema = tool.inputSchema
+    assert "type" not in schema.get("required", [])

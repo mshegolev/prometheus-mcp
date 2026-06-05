@@ -1,4 +1,4 @@
-"""Integration tests for the five MCP tools.
+"""Integration tests for the eight MCP tools.
 
 We exercise each tool end-to-end via its public function, mocking the
 Prometheus HTTP layer with :mod:`responses`. The goal is to cover the
@@ -18,8 +18,11 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from prometheus_mcp import _mcp
 from prometheus_mcp.tools import (
+    prometheus_get_metric_metadata,
     prometheus_list_alerts,
+    prometheus_list_label_values,
     prometheus_list_metrics,
+    prometheus_list_rules,
     prometheus_list_targets,
     prometheus_query,
     prometheus_query_range,
@@ -648,3 +651,315 @@ def test_list_targets_401_raises_tool_error() -> None:
     responses.add(responses.GET, f"{API}/targets", json={}, status=401)
     with pytest.raises(ToolError, match="401"):
         prometheus_list_targets()
+
+
+# ── prometheus_get_metric_metadata ─────────────────────────────────────────
+
+
+@responses.activate
+def test_metadata_happy_path() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/metadata",
+        json={
+            "status": "success",
+            "data": {
+                "http_requests_total": [{"type": "counter", "help": "Total HTTP requests", "unit": ""}],
+                "node_cpu_seconds_total": [{"type": "counter", "help": "CPU seconds", "unit": "seconds"}],
+                "up": [{"type": "gauge", "help": "Target up/down", "unit": ""}],
+            },
+        },
+        status=200,
+    )
+    result = prometheus_get_metric_metadata()
+    data = result.structuredContent
+    assert data["total_count"] == 3
+    assert data["returned_count"] == 3
+    assert data["truncated"] is False
+    assert "http_requests_total" in data["metadata"]
+    assert data["metadata"]["http_requests_total"][0]["type"] == "counter"
+    assert data["metadata"]["http_requests_total"][0]["help"] == "Total HTTP requests"
+
+
+@responses.activate
+def test_metadata_with_metric_filter() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/metadata",
+        json={
+            "status": "success",
+            "data": {
+                "http_requests_total": [{"type": "counter", "help": "Total HTTP requests", "unit": ""}],
+            },
+        },
+        status=200,
+    )
+    result = prometheus_get_metric_metadata(metric="http_requests_total")
+    data = result.structuredContent
+    assert data["metric"] == "http_requests_total"
+    assert data["returned_count"] == 1
+    # Verify filter param forwarded
+    assert "metric=http_requests_total" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_metadata_empty_result() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/metadata",
+        json={"status": "success", "data": {}},
+        status=200,
+    )
+    result = prometheus_get_metric_metadata()
+    data = result.structuredContent
+    assert data["total_count"] == 0
+    assert data["returned_count"] == 0
+    assert data["metadata"] == {}
+
+
+@responses.activate
+def test_metadata_401_raises_tool_error() -> None:
+    responses.add(responses.GET, f"{API}/metadata", json={}, status=401)
+    with pytest.raises(ToolError, match="401"):
+        prometheus_get_metric_metadata()
+
+
+@responses.activate
+def test_metadata_markdown_contains_table() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/metadata",
+        json={
+            "status": "success",
+            "data": {
+                "up": [{"type": "gauge", "help": "Target health", "unit": ""}],
+            },
+        },
+        status=200,
+    )
+    result = prometheus_get_metric_metadata()
+    md = result.content[0].text
+    assert "Metric Metadata" in md
+    assert "`up`" in md
+    assert "gauge" in md
+
+
+# ── prometheus_list_label_values ───────────────────────────────────────────
+
+
+@responses.activate
+def test_label_values_happy_path() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/label/job/values",
+        json={"status": "success", "data": ["node-exporter", "prometheus", "grafana"]},
+        status=200,
+    )
+    result = prometheus_list_label_values(label="job")
+    data = result.structuredContent
+    assert data["label"] == "job"
+    assert data["total_count"] == 3
+    assert data["returned_count"] == 3
+    assert data["truncated"] is False
+    assert data["values"] == ["grafana", "node-exporter", "prometheus"]  # sorted
+
+
+@responses.activate
+def test_label_values_with_match_filter() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/label/instance/values",
+        json={"status": "success", "data": ["host1:9100", "host2:9100"]},
+        status=200,
+    )
+    result = prometheus_list_label_values(label="instance", match='{job="node-exporter"}')
+    data = result.structuredContent
+    assert data["match"] == '{job="node-exporter"}'
+    assert data["returned_count"] == 2
+    # Verify match[] forwarded in URL
+    assert "match%5B%5D" in responses.calls[0].request.url or "match[]" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_label_values_empty_result() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/label/nonexistent/values",
+        json={"status": "success", "data": []},
+        status=200,
+    )
+    result = prometheus_list_label_values(label="nonexistent")
+    data = result.structuredContent
+    assert data["total_count"] == 0
+    assert data["values"] == []
+
+
+@responses.activate
+def test_label_values_401_raises_tool_error() -> None:
+    responses.add(responses.GET, f"{API}/label/job/values", json={}, status=401)
+    with pytest.raises(ToolError, match="401"):
+        prometheus_list_label_values(label="job")
+
+
+@responses.activate
+def test_label_values_markdown_content() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/label/job/values",
+        json={"status": "success", "data": ["node", "prom"]},
+        status=200,
+    )
+    result = prometheus_list_label_values(label="job")
+    md = result.content[0].text
+    assert "Label Values" in md
+    assert "`job`" in md
+    assert "`node`" in md
+
+
+# ── prometheus_list_rules ──────────────────────────────────────────────────
+
+
+@responses.activate
+def test_rules_happy_path() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/rules",
+        json={
+            "status": "success",
+            "data": {
+                "groups": [
+                    {
+                        "name": "node_alerts",
+                        "file": "/etc/prometheus/rules/node.yml",
+                        "rules": [
+                            {
+                                "name": "NodeDown",
+                                "query": "up{job='node'} == 0",
+                                "type": "alerting",
+                                "state": "firing",
+                                "labels": {"severity": "critical"},
+                                "health": "ok",
+                            },
+                            {
+                                "name": "node:cpu:rate5m",
+                                "query": "rate(node_cpu_seconds_total[5m])",
+                                "type": "recording",
+                                "labels": {},
+                                "health": "ok",
+                            },
+                        ],
+                    }
+                ]
+            },
+        },
+        status=200,
+    )
+    result = prometheus_list_rules()
+    data = result.structuredContent
+    assert data["total_groups"] == 1
+    assert data["total_rules"] == 2
+    assert data["recording_count"] == 1
+    assert data["alerting_count"] == 1
+    assert data["type_filter"] is None
+    group = data["groups"][0]
+    assert group["name"] == "node_alerts"
+    assert group["rule_count"] == 2
+    assert group["rules"][0]["name"] == "NodeDown"
+    assert group["rules"][0]["state"] == "firing"
+    assert group["rules"][1]["type"] == "recording"
+
+
+@responses.activate
+def test_rules_with_type_filter() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/rules",
+        json={
+            "status": "success",
+            "data": {
+                "groups": [
+                    {
+                        "name": "alerts",
+                        "file": "alerts.yml",
+                        "rules": [
+                            {
+                                "name": "HighCPU",
+                                "query": "cpu > 80",
+                                "type": "alerting",
+                                "state": "inactive",
+                                "labels": {},
+                                "health": "ok",
+                            }
+                        ],
+                    }
+                ]
+            },
+        },
+        status=200,
+    )
+    result = prometheus_list_rules(type="alert")
+    data = result.structuredContent
+    assert data["type_filter"] == "alert"
+    assert "type=alert" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_rules_empty_result() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/rules",
+        json={"status": "success", "data": {"groups": []}},
+        status=200,
+    )
+    result = prometheus_list_rules()
+    data = result.structuredContent
+    assert data["total_groups"] == 0
+    assert data["total_rules"] == 0
+
+
+@responses.activate
+def test_rules_invalid_type_raises_tool_error() -> None:
+    with pytest.raises(ToolError, match="type must be"):
+        prometheus_list_rules(type="invalid")
+
+
+@responses.activate
+def test_rules_401_raises_tool_error() -> None:
+    responses.add(responses.GET, f"{API}/rules", json={}, status=401)
+    with pytest.raises(ToolError, match="401"):
+        prometheus_list_rules()
+
+
+@responses.activate
+def test_rules_markdown_content() -> None:
+    responses.add(
+        responses.GET,
+        f"{API}/rules",
+        json={
+            "status": "success",
+            "data": {
+                "groups": [
+                    {
+                        "name": "test_group",
+                        "file": "test.yml",
+                        "rules": [
+                            {
+                                "name": "TestAlert",
+                                "query": "up == 0",
+                                "type": "alerting",
+                                "state": "inactive",
+                                "labels": {},
+                                "health": "ok",
+                            }
+                        ],
+                    }
+                ]
+            },
+        },
+        status=200,
+    )
+    result = prometheus_list_rules()
+    md = result.content[0].text
+    assert "Prometheus Rules" in md
+    assert "test_group" in md
+    assert "TestAlert" in md
