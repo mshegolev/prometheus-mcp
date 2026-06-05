@@ -17,7 +17,9 @@ asyncio event loop.
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -25,6 +27,12 @@ import requests
 import urllib3
 
 from prometheus_mcp.errors import ConfigError
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_TIMEOUT = 30
+_RETRY_BACKOFF = 1.0  # seconds between retries
+_MAX_RETRIES = 1  # one automatic retry for transient failures
 
 
 def _parse_bool(value: str | bool | None, *, default: bool) -> bool:
@@ -78,6 +86,7 @@ class PrometheusClient:
         username: Override ``PROMETHEUS_USERNAME``. If ``None``, read from env.
         password: Override ``PROMETHEUS_PASSWORD``. If ``None``, read from env.
         ssl_verify: Override ``PROMETHEUS_SSL_VERIFY``. If ``None``, read from env.
+        timeout: Override ``PROMETHEUS_TIMEOUT``. If ``None``, read from env.
 
     Raises:
         ConfigError: If PROMETHEUS_URL is missing or malformed.
@@ -90,6 +99,7 @@ class PrometheusClient:
         username: str | None = None,
         password: str | None = None,
         ssl_verify: bool | None = None,
+        timeout: float | None = None,
     ) -> None:
         raw_url = url if url is not None else os.environ.get("PROMETHEUS_URL", "")
         self.url = _validate_url(raw_url)
@@ -102,6 +112,17 @@ class PrometheusClient:
         if ssl_verify is None:
             ssl_verify = _parse_bool(os.environ.get("PROMETHEUS_SSL_VERIFY"), default=True)
         self.ssl_verify = ssl_verify
+
+        if timeout is None:
+            env_timeout = os.environ.get("PROMETHEUS_TIMEOUT", "")
+            if env_timeout:
+                try:
+                    timeout = float(env_timeout)
+                except ValueError as e:
+                    raise ConfigError(f"PROMETHEUS_TIMEOUT must be a number of seconds (got: {env_timeout!r})") from e
+            else:
+                timeout = float(_DEFAULT_TIMEOUT)
+        self.timeout = timeout
 
         self.session = requests.Session()
         self.session.verify = self.ssl_verify
@@ -123,6 +144,17 @@ class PrometheusClient:
         if not self.ssl_verify:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        """Return ``True`` for transient failures that warrant an automatic retry."""
+        if isinstance(exc, requests.ConnectionError):
+            return True
+        if isinstance(exc, requests.Timeout):
+            return True
+        if isinstance(exc, requests.HTTPError) and exc.response is not None:
+            return exc.response.status_code >= 500
+        return False
+
     def _request(
         self,
         method: str,
@@ -130,14 +162,25 @@ class PrometheusClient:
         *,
         params: dict[str, Any] | None = None,
     ) -> requests.Response:
-        response = self.session.request(
-            method=method,
-            url=f"{self.api_url}{endpoint}",
-            params=params,
-            timeout=30,
-        )
-        response.raise_for_status()
-        return response
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = self.session.request(
+                    method=method,
+                    url=f"{self.api_url}{endpoint}",
+                    params=params,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return response
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES and self._is_retryable(exc):
+                    logger.debug("prometheus_mcp: retrying %s %s after %s", method, endpoint, type(exc).__name__)
+                    time.sleep(_RETRY_BACKOFF)
+                    continue
+                raise
+        raise last_exc  # type: ignore[misc]  # unreachable but satisfies type-checker
 
     def get(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
         """GET ``{api_url}{endpoint}`` and return parsed JSON.

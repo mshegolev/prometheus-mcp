@@ -48,6 +48,13 @@
           "isRequired": false,
           "format": "string",
           "default": "true"
+        },
+        {
+          "name": "PROMETHEUS_TIMEOUT",
+          "description": "HTTP request timeout in seconds. Increase for slow or remote Prometheus instances.",
+          "isRequired": false,
+          "format": "string",
+          "default": "30"
         }
       ]
     }

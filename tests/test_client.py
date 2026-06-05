@@ -8,6 +8,8 @@ validation, :class:`PrometheusClient` construction (which raises
 from __future__ import annotations
 
 import pytest
+import requests
+import responses
 
 from prometheus_mcp.client import PrometheusClient, _parse_bool, _validate_url
 from prometheus_mcp.errors import ConfigError
@@ -172,5 +174,84 @@ class TestPrometheusClientInit:
         client = PrometheusClient()
         try:
             assert client.api_url.endswith("/api/v1")
+        finally:
+            client.close()
+
+    def test_timeout_default_30(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        monkeypatch.delenv("PROMETHEUS_TIMEOUT", raising=False)
+        client = PrometheusClient()
+        try:
+            assert client.timeout == 30.0
+        finally:
+            client.close()
+
+    def test_timeout_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        monkeypatch.setenv("PROMETHEUS_TIMEOUT", "60")
+        client = PrometheusClient()
+        try:
+            assert client.timeout == 60.0
+        finally:
+            client.close()
+
+    def test_timeout_from_constructor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        client = PrometheusClient(timeout=45.0)
+        try:
+            assert client.timeout == 45.0
+        finally:
+            client.close()
+
+    def test_timeout_invalid_raises_config_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        monkeypatch.setenv("PROMETHEUS_TIMEOUT", "not-a-number")
+        with pytest.raises(ConfigError, match="PROMETHEUS_TIMEOUT"):
+            PrometheusClient()
+
+
+class TestRetryLogic:
+    """Tests for the automatic retry on transient failures."""
+
+    @responses.activate
+    def test_retry_on_500_then_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        monkeypatch.setattr("prometheus_mcp.client._RETRY_BACKOFF", 0.0)
+        url = "https://prometheus.example.com/api/v1/label/__name__/values"
+        responses.add(responses.GET, url, json={"status": "error"}, status=500)
+        responses.add(responses.GET, url, json={"status": "success", "data": []}, status=200)
+        client = PrometheusClient()
+        try:
+            result = client.get("/label/__name__/values")
+            assert len(responses.calls) == 2
+            assert result["status"] == "success"
+        finally:
+            client.close()
+
+    @responses.activate
+    def test_no_retry_on_400(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        url = "https://prometheus.example.com/api/v1/query"
+        responses.add(responses.GET, url, json={"status": "error", "error": "bad"}, status=400)
+        client = PrometheusClient()
+        try:
+            with pytest.raises(requests.HTTPError):
+                client.get("/query")
+            assert len(responses.calls) == 1  # no retry
+        finally:
+            client.close()
+
+    @responses.activate
+    def test_retry_exhausted_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        monkeypatch.setattr("prometheus_mcp.client._RETRY_BACKOFF", 0.0)
+        url = "https://prometheus.example.com/api/v1/query"
+        responses.add(responses.GET, url, json={"status": "error"}, status=503)
+        responses.add(responses.GET, url, json={"status": "error"}, status=503)
+        client = PrometheusClient()
+        try:
+            with pytest.raises(requests.HTTPError):
+                client.get("/query")
+            assert len(responses.calls) == 2  # original + 1 retry
         finally:
             client.close()

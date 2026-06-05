@@ -26,7 +26,7 @@ def handle(exc: Exception, action: str) -> str:
         return (
             f"Error: configuration problem while {action} — {exc}. "
             "Check PROMETHEUS_URL, PROMETHEUS_TOKEN, PROMETHEUS_USERNAME, PROMETHEUS_PASSWORD, "
-            "PROMETHEUS_SSL_VERIFY environment variables."
+            "PROMETHEUS_SSL_VERIFY, PROMETHEUS_TIMEOUT environment variables."
         )
 
     if isinstance(exc, requests.HTTPError):
