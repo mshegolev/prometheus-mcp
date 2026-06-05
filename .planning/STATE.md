@@ -9,28 +9,31 @@
 See: .planning/PROJECT.md (updated 2026-06-06)
 
 **Core value:** AI agents can autonomously investigate production errors by querying Prometheus
-**Current focus:** Phase 1 — Investigation Tools
+**Current focus:** All phases complete
 
 ## Current Phase
 
-**Phase 1: Investigation Tools** — Not Started
+All 3 phases complete.
 
 ## Progress
 
 | Phase | Name | Status | Plans |
 |-------|------|--------|-------|
-| 1 | Investigation Tools | Not Started | 0/0 |
-| 2 | Reliability Hardening | Not Started | 0/0 |
-| 3 | Test Quality | Not Started | 0/0 |
+| 1 | Investigation Tools | Complete ✓ | 1/1 |
+| 2 | Reliability Hardening | Complete ✓ | 1/1 |
+| 3 | Test Quality | Complete ✓ | 1/1 |
 
 ## Blockers / Concerns
 
-None currently.
+None.
 
 ## Recent Activity
 
+- 2026-06-06: Phase 3 complete — shared fixtures, dropped/any target tests, client behavior tests
+- 2026-06-06: Phase 2 complete — retry logic, configurable PROMETHEUS_TIMEOUT
+- 2026-06-06: Phase 1 complete — 3 new investigation tools (metadata, label values, rules)
 - 2026-06-06: Project initialized with 3 phases
 - 2026-06-06: Codebase mapped (7 documents in .planning/codebase/)
 
 ---
-*Last updated: 2026-06-06 after initialization*
+*Last updated: 2026-06-06 after Phase 3 completion*

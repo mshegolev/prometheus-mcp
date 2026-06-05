@@ -9,20 +9,20 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Investigation Tools
 
-- [ ] **TOOL-01**: Agent can retrieve metric metadata (HELP text, TYPE, UNIT) for any metric name to understand what it measures
-- [ ] **TOOL-02**: Agent can list all values for a specific label (e.g., all jobs, all instances) to build targeted queries
-- [ ] **TOOL-03**: Agent can inspect recording rules and alerting rules to understand the alerting configuration
+- [x] **TOOL-01**: Agent can retrieve metric metadata (HELP text, TYPE, UNIT) for any metric name to understand what it measures
+- [x] **TOOL-02**: Agent can list all values for a specific label (e.g., all jobs, all instances) to build targeted queries
+- [x] **TOOL-03**: Agent can inspect recording rules and alerting rules to understand the alerting configuration
 
 ### Reliability
 
-- [ ] **REL-01**: HTTP requests automatically retry once on transient 5xx errors and connection resets with backoff
-- [ ] **REL-02**: HTTP timeout is configurable via PROMETHEUS_TIMEOUT environment variable (default 30s)
+- [x] **REL-01**: HTTP requests automatically retry once on transient 5xx errors and connection resets with backoff
+- [x] **REL-02**: HTTP timeout is configurable via PROMETHEUS_TIMEOUT environment variable (default 30s)
 
 ### Quality
 
-- [ ] **QUAL-01**: Shared test fixtures extracted to tests/conftest.py eliminating duplication
-- [ ] **QUAL-02**: Tests cover prometheus_list_targets with state='dropped' and state='any' paths
-- [ ] **QUAL-03**: Tests cover PrometheusClient timeout behavior, empty responses, and session reuse
+- [x] **QUAL-01**: Shared test fixtures extracted to tests/conftest.py eliminating duplication
+- [x] **QUAL-02**: Tests cover prometheus_list_targets with state='dropped' and state='any' paths
+- [x] **QUAL-03**: Tests cover PrometheusClient timeout behavior, empty responses, and session reuse
 
 ## v2 Requirements
 
@@ -57,14 +57,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TOOL-01 | Phase 1 | Pending |
-| TOOL-02 | Phase 1 | Pending |
-| TOOL-03 | Phase 1 | Pending |
-| REL-01 | Phase 2 | Pending |
-| REL-02 | Phase 2 | Pending |
-| QUAL-01 | Phase 3 | Pending |
-| QUAL-02 | Phase 3 | Pending |
-| QUAL-03 | Phase 3 | Pending |
+| TOOL-01 | Phase 1 | Complete |
+| TOOL-02 | Phase 1 | Complete |
+| TOOL-03 | Phase 1 | Complete |
+| REL-01 | Phase 2 | Complete |
+| REL-02 | Phase 2 | Complete |
+| QUAL-01 | Phase 3 | Complete |
+| QUAL-02 | Phase 3 | Complete |
+| QUAL-03 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 8 total
@@ -73,4 +73,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-06-06*
-*Last updated: 2026-06-06 after initial definition*
+*Last updated: 2026-06-06 after all phases complete*
