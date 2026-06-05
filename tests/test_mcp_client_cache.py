@@ -15,15 +15,8 @@ from prometheus_mcp.client import PrometheusClient
 
 
 @pytest.fixture(autouse=True)
-def reset_cache() -> None:
-    """Clear the module-global client between tests to avoid test-order coupling."""
-    with _mcp._client_lock:
-        if _mcp._client is not None:
-            try:
-                _mcp._client.close()
-            except Exception:
-                pass
-        _mcp._client = None
+def _auto_reset(reset_client_cache: None) -> None:
+    """Delegate to the shared ``reset_client_cache`` fixture from conftest.py."""
 
 
 def test_get_client_returns_same_instance(monkeypatch: pytest.MonkeyPatch) -> None:

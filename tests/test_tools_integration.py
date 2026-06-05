@@ -16,7 +16,6 @@ import pytest
 import responses
 from mcp.server.fastmcp.exceptions import ToolError
 
-from prometheus_mcp import _mcp
 from prometheus_mcp.tools import (
     prometheus_get_metric_metadata,
     prometheus_list_alerts,
@@ -33,25 +32,14 @@ API = f"{BASE}/api/v1"
 
 
 @pytest.fixture(autouse=True)
-def configured_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set env vars + reset the module-global client cache per-test."""
+def configured_env(monkeypatch: pytest.MonkeyPatch, reset_client_cache: None) -> None:
+    """Set env vars + reset the module-global client cache per-test.
+
+    Delegates cache reset to the shared ``reset_client_cache`` fixture from
+    ``conftest.py`` — no duplication of lock/cleanup logic.
+    """
     monkeypatch.setenv("PROMETHEUS_URL", BASE)
     monkeypatch.delenv("PROMETHEUS_TOKEN", raising=False)
-    with _mcp._client_lock:
-        if _mcp._client is not None:
-            try:
-                _mcp._client.close()
-            except Exception:
-                pass
-        _mcp._client = None
-    yield
-    with _mcp._client_lock:
-        if _mcp._client is not None:
-            try:
-                _mcp._client.close()
-            except Exception:
-                pass
-        _mcp._client = None
 
 
 # ── prometheus_list_metrics ────────────────────────────────────────────────
@@ -651,6 +639,77 @@ def test_list_targets_401_raises_tool_error() -> None:
     responses.add(responses.GET, f"{API}/targets", json={}, status=401)
     with pytest.raises(ToolError, match="401"):
         prometheus_list_targets()
+
+
+@responses.activate
+def test_list_targets_state_dropped() -> None:
+    """Test state='dropped' returns only dropped targets."""
+    responses.add(
+        responses.GET,
+        f"{API}/targets",
+        json={
+            "status": "success",
+            "data": {
+                "activeTargets": [],
+                "droppedTargets": [
+                    {
+                        "discoveredLabels": {"job": "old-service", "instance": "host1:9100"},
+                        "labels": {"job": "old-service", "instance": "host1:9100"},
+                        "health": "unknown",
+                    }
+                ],
+            },
+        },
+        status=200,
+    )
+    result = prometheus_list_targets(state="dropped")
+    data = result.structuredContent
+    assert data["state_filter"] == "dropped"
+    assert data["total_count"] == 1
+    assert data["targets"][0]["job"] == "old-service"
+    assert "state=dropped" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_list_targets_state_any() -> None:
+    """Test state='any' returns both active and dropped targets."""
+    responses.add(
+        responses.GET,
+        f"{API}/targets",
+        json={
+            "status": "success",
+            "data": {
+                "activeTargets": [_make_target("node", "host1:9100", "up")],
+                "droppedTargets": [
+                    {
+                        "labels": {"job": "old", "instance": "host2:9100"},
+                        "health": "unknown",
+                    }
+                ],
+            },
+        },
+        status=200,
+    )
+    result = prometheus_list_targets(state="any")
+    data = result.structuredContent
+    assert data["state_filter"] == "any"
+    assert data["total_count"] == 2  # 1 active + 1 dropped
+
+
+@responses.activate
+def test_list_targets_empty_response() -> None:
+    """Test with no targets at all."""
+    responses.add(
+        responses.GET,
+        f"{API}/targets",
+        json={"status": "success", "data": {"activeTargets": [], "droppedTargets": []}},
+        status=200,
+    )
+    result = prometheus_list_targets()
+    data = result.structuredContent
+    assert data["total_count"] == 0
+    assert data["up_count"] == 0
+    assert data["down_count"] == 0
 
 
 # ── prometheus_get_metric_metadata ─────────────────────────────────────────

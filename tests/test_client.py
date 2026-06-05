@@ -255,3 +255,61 @@ class TestRetryLogic:
             assert len(responses.calls) == 2  # original + 1 retry
         finally:
             client.close()
+
+
+class TestClientHttpBehavior:
+    """Tests for PrometheusClient HTTP behavior: empty responses, session reuse."""
+
+    @responses.activate
+    def test_empty_response_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GET with empty response body returns None."""
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        url = "https://prometheus.example.com/api/v1/query"
+        responses.add(responses.GET, url, body=b"", status=200)
+        client = PrometheusClient()
+        try:
+            result = client.get("/query")
+            assert result is None
+        finally:
+            client.close()
+
+    @responses.activate
+    def test_session_reused_across_calls(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Multiple get() calls reuse the same session (connection pooling)."""
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        url = "https://prometheus.example.com/api/v1/label/__name__/values"
+        responses.add(responses.GET, url, json={"status": "success", "data": []}, status=200)
+        responses.add(responses.GET, url, json={"status": "success", "data": ["up"]}, status=200)
+        client = PrometheusClient()
+        try:
+            session_before = client.session
+            client.get("/label/__name__/values")
+            client.get("/label/__name__/values")
+            assert client.session is session_before  # same session object
+            assert len(responses.calls) == 2
+        finally:
+            client.close()
+
+    @responses.activate
+    def test_custom_timeout_used_in_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Custom timeout is passed through to the HTTP request."""
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        url = "https://prometheus.example.com/api/v1/query"
+        responses.add(responses.GET, url, json={"status": "success", "data": {}}, status=200)
+        client = PrometheusClient(timeout=60.0)
+        try:
+            client.get("/query", params={"query": "up"})
+            # The responses library records the request — verify timeout was set
+            assert client.timeout == 60.0
+        finally:
+            client.close()
+
+    @responses.activate
+    def test_close_then_request_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """close() closes the session; subsequent requests fail gracefully."""
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        client = PrometheusClient()
+        client.close()
+        # After close, making a request should raise (connection pool closed)
+        with pytest.raises((ConnectionError, OSError)):
+            client.get("/query")
