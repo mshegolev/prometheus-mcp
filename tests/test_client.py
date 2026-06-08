@@ -313,3 +313,65 @@ class TestClientHttpBehavior:
         # After close, making a request should raise (connection pool closed)
         with pytest.raises((ConnectionError, OSError)):
             client.get("/query")
+
+
+class TestResponseSizeLimits:
+    """Tests for PROMETHEUS_MAX_RESPONSE_BYTES."""
+
+    def test_default_10mb(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        monkeypatch.delenv("PROMETHEUS_MAX_RESPONSE_BYTES", raising=False)
+        client = PrometheusClient()
+        try:
+            assert client.max_response_bytes == 10 * 1024 * 1024
+        finally:
+            client.close()
+
+    def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        monkeypatch.setenv("PROMETHEUS_MAX_RESPONSE_BYTES", "1048576")
+        client = PrometheusClient()
+        try:
+            assert client.max_response_bytes == 1048576
+        finally:
+            client.close()
+
+    def test_from_constructor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        client = PrometheusClient(max_response_bytes=5000)
+        try:
+            assert client.max_response_bytes == 5000
+        finally:
+            client.close()
+
+    def test_invalid_raises_config_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        monkeypatch.setenv("PROMETHEUS_MAX_RESPONSE_BYTES", "not-a-number")
+        with pytest.raises(ConfigError, match="PROMETHEUS_MAX_RESPONSE_BYTES"):
+            PrometheusClient()
+
+    @responses.activate
+    def test_oversized_response_raises_value_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        url = "https://prometheus.example.com/api/v1/query"
+        # Create a response larger than 100 bytes
+        big_body = '{"status":"success","data":' + '"x"' * 50 + "}"
+        responses.add(responses.GET, url, body=big_body, status=200)
+        client = PrometheusClient(max_response_bytes=100)
+        try:
+            with pytest.raises(ValueError, match="exceeds limit"):
+                client.get("/query")
+        finally:
+            client.close()
+
+    @responses.activate
+    def test_normal_response_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
+        url = "https://prometheus.example.com/api/v1/query"
+        responses.add(responses.GET, url, json={"status": "success"}, status=200)
+        client = PrometheusClient(max_response_bytes=10 * 1024 * 1024)
+        try:
+            result = client.get("/query")
+            assert result["status"] == "success"
+        finally:
+            client.close()

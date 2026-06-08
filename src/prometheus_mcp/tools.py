@@ -23,6 +23,7 @@ from pydantic import Field
 
 from prometheus_mcp import output
 from prometheus_mcp._mcp import get_client, mcp
+from prometheus_mcp.cache import get_metrics_cache
 from prometheus_mcp.models import (
     AlertItem,
     AlertStateSummary,
@@ -157,9 +158,16 @@ def prometheus_list_metrics(
         ``pattern`` / ``metrics`` (sorted list).
     """
     try:
-        client = get_client()
-        data = client.get("/label/__name__/values") or {}
-        raw: list[str] = data.get("data") or []
+        cache = get_metrics_cache()
+        cache_key = "__name__values"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            raw: list[str] = cached
+        else:
+            client = get_client()
+            data = client.get("/label/__name__/values") or {}
+            raw = data.get("data") or []
+            cache.set(cache_key, raw)
 
         # Apply pattern filter
         if pattern:

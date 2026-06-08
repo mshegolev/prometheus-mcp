@@ -31,6 +31,7 @@ from prometheus_mcp.errors import ConfigError
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT = 30
+_DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB
 _RETRY_BACKOFF = 1.0  # seconds between retries
 _MAX_RETRIES = 1  # one automatic retry for transient failures
 
@@ -87,6 +88,7 @@ class PrometheusClient:
         password: Override ``PROMETHEUS_PASSWORD``. If ``None``, read from env.
         ssl_verify: Override ``PROMETHEUS_SSL_VERIFY``. If ``None``, read from env.
         timeout: Override ``PROMETHEUS_TIMEOUT``. If ``None``, read from env.
+        max_response_bytes: Override ``PROMETHEUS_MAX_RESPONSE_BYTES``. If ``None``, read from env.
 
     Raises:
         ConfigError: If PROMETHEUS_URL is missing or malformed.
@@ -100,6 +102,7 @@ class PrometheusClient:
         password: str | None = None,
         ssl_verify: bool | None = None,
         timeout: float | None = None,
+        max_response_bytes: int | None = None,
     ) -> None:
         raw_url = url if url is not None else os.environ.get("PROMETHEUS_URL", "")
         self.url = _validate_url(raw_url)
@@ -123,6 +126,17 @@ class PrometheusClient:
             else:
                 timeout = float(_DEFAULT_TIMEOUT)
         self.timeout = timeout
+
+        if max_response_bytes is None:
+            env_max = os.environ.get("PROMETHEUS_MAX_RESPONSE_BYTES", "")
+            if env_max:
+                try:
+                    max_response_bytes = int(env_max)
+                except ValueError as e:
+                    raise ConfigError(f"PROMETHEUS_MAX_RESPONSE_BYTES must be an integer (got: {env_max!r})") from e
+            else:
+                max_response_bytes = _DEFAULT_MAX_RESPONSE_BYTES
+        self.max_response_bytes = max_response_bytes
 
         self.session = requests.Session()
         self.session.verify = self.ssl_verify
@@ -186,12 +200,46 @@ class PrometheusClient:
         """GET ``{api_url}{endpoint}`` and return parsed JSON.
 
         Prometheus always returns JSON for 2xx responses; returns ``None`` for
-        empty bodies.
+        empty bodies. Raises ``ValueError`` if the response exceeds
+        ``max_response_bytes``.
         """
         response = self._request("GET", endpoint, params=params)
         if not response.content:
             return None
+        content_length = len(response.content)
+        if content_length > self.max_response_bytes:
+            raise ValueError(
+                f"Response size {content_length:,} bytes exceeds limit of "
+                f"{self.max_response_bytes:,} bytes (PROMETHEUS_MAX_RESPONSE_BYTES). "
+                f"Narrow the query or increase the limit."
+            )
         return response.json()
+
+    def get_raw(self, path: str, params: dict[str, Any] | None = None) -> requests.Response:
+        """GET ``{base_url}{path}`` (no /api/v1 prefix) and return the raw response.
+
+        Used for management endpoints (``/-/healthy``, ``/-/ready``) that live
+        outside the ``/api/v1`` namespace.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = self.session.request(
+                    method="GET",
+                    url=f"{self.url}{path}",
+                    params=params,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return response
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES and self._is_retryable(exc):
+                    logger.debug("prometheus_mcp: retrying GET %s after %s", path, type(exc).__name__)
+                    time.sleep(_RETRY_BACKOFF)
+                    continue
+                raise
+        raise last_exc  # type: ignore[misc]
 
     def close(self) -> None:
         """Close the underlying HTTP session (called from lifespan on shutdown)."""

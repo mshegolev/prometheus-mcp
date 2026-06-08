@@ -12,15 +12,16 @@ from collections.abc import Generator
 import pytest
 
 from prometheus_mcp import _mcp
+from prometheus_mcp.cache import get_metrics_cache
 
 
 @pytest.fixture()
 def reset_client_cache() -> Generator[None, None, None]:
-    """Reset the module-global PrometheusClient cache before and after a test.
+    """Reset the module-global PrometheusClient cache and metrics cache.
 
     This fixture acquires ``_mcp._client_lock``, closes any existing client,
-    and sets ``_mcp._client = None``. It yields, then repeats cleanup after
-    the test to prevent leaking state to subsequent tests.
+    sets ``_mcp._client = None``, and clears the metrics TTL cache.
+    It yields, then repeats cleanup after the test.
 
     Usage:
         Apply via ``@pytest.mark.usefixtures("reset_client_cache")`` on a
@@ -38,7 +39,7 @@ def reset_client_cache() -> Generator[None, None, None]:
 
 
 def _do_reset() -> None:
-    """Close the cached client (if any) and clear the cache."""
+    """Close the cached client (if any), clear client and metrics caches."""
     with _mcp._client_lock:
         if _mcp._client is not None:
             try:
@@ -46,3 +47,5 @@ def _do_reset() -> None:
             except Exception:
                 pass
         _mcp._client = None
+    # Clear the metrics TTL cache to prevent cross-test contamination.
+    get_metrics_cache().clear()

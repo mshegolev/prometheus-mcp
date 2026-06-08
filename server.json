@@ -55,6 +55,20 @@
           "isRequired": false,
           "format": "string",
           "default": "30"
+        },
+        {
+          "name": "PROMETHEUS_MAX_RESPONSE_BYTES",
+          "description": "Maximum HTTP response body size in bytes. Protects against runaway queries. Default: 10485760 (10MB).",
+          "isRequired": false,
+          "format": "string",
+          "default": "10485760"
+        },
+        {
+          "name": "PROMETHEUS_CACHE_TTL",
+          "description": "Cache TTL in seconds for metric name lists. Set to 0 to disable. Default: 300.",
+          "isRequired": false,
+          "format": "string",
+          "default": "300"
         }
       ]
     }
