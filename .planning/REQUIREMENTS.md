@@ -71,21 +71,21 @@ Deferred beyond v2.0.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AM-01 | — | Pending |
-| AM-02 | — | Pending |
-| AM-03 | — | Pending |
-| AM-04 | — | Pending |
-| CARD-01 | — | Pending |
-| OPS-01 | — | Pending |
-| OPS-02 | — | Pending |
-| OPS-03 | — | Pending |
-| STAT-01 | — | Pending |
-| STAT-02 | — | Pending |
+| OPS-02 | Phase 4 | Pending |
+| OPS-03 | Phase 4 | Pending |
+| OPS-01 | Phase 5 | Pending |
+| CARD-01 | Phase 5 | Pending |
+| STAT-01 | Phase 5 | Pending |
+| STAT-02 | Phase 5 | Pending |
+| AM-01 | Phase 6 | Pending |
+| AM-02 | Phase 6 | Pending |
+| AM-03 | Phase 6 | Pending |
+| AM-04 | Phase 6 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 10 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 10
+- Mapped to phases: 10
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-08*

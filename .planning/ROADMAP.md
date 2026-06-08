@@ -1,72 +1,92 @@
-# Roadmap: prometheus-mcp v1.0
+# Roadmap: prometheus-mcp v2.0
 
-**Created:** 2026-06-06
-**Milestone:** v1.0
-**Phases:** 3
+**Created:** 2026-06-08
+**Milestone:** v2.0
+**Phases:** 4 (continuing from v1.0 Phase 3)
 **Granularity:** coarse
 
 ## Phase Overview
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 1 | Investigation Tools | Add 3 new MCP tools for metric metadata, label discovery, and rule inspection | TOOL-01, TOOL-02, TOOL-03 | 3 |
-| 2 | Reliability Hardening | Add retry logic and configurable timeouts for enterprise use | REL-01, REL-02 | 3 |
-| 3 | Test Quality | Extract shared fixtures and fill coverage gaps | QUAL-01, QUAL-02, QUAL-03 | 3 |
+| 4 | Client Hardening | Add response size limits and metric name caching to the HTTP client layer | OPS-02, OPS-03 | 4 |
+| 5 | Prometheus Status Tools | Add health check, cardinality, runtime info, and build info tools | OPS-01, CARD-01, STAT-01, STAT-02 | 5 |
+| 6 | Alertmanager Integration | Add AlertmanagerClient and 4 Alertmanager tools | AM-01, AM-02, AM-03, AM-04 | 5 |
+| 7 | v2.0 Test & Release Prep | Comprehensive test coverage for all new code, version bump | — | 4 |
 
-## Phase 1: Investigation Tools
+## Phase 4: Client Hardening
 
-**Goal:** Add 3 new MCP tools that enable AI agents to autonomously investigate errors by discovering metric metadata, label values, and alerting/recording rules.
+**Goal:** Harden the HTTP client layer with response size limits and metric name caching, providing the foundation for all subsequent tool phases.
 
-**Requirements:** TOOL-01, TOOL-02, TOOL-03
+**Requirements:** OPS-02, OPS-03
 
 **Success Criteria:**
-1. `prometheus_get_metric_metadata` tool returns HELP, TYPE, and UNIT for queried metrics with dual-channel output
-2. `prometheus_list_label_values` tool returns all values for a given label name with optional metric filter and dual-channel output
-3. `prometheus_list_rules` tool returns both recording and alerting rules grouped by group name with dual-channel output
-4. All 3 new tools registered in test_protocol.py EXPECTED_TOOLS and pass schema validation
-5. Integration tests with mocked HTTP cover happy path and error paths for each new tool
+1. HTTP responses exceeding PROMETHEUS_MAX_RESPONSE_BYTES (default 10MB) raise a ToolError with a clear message about the limit
+2. PROMETHEUS_MAX_RESPONSE_BYTES is configurable via environment variable and documented in .env.example and server.json
+3. prometheus_list_metrics uses a TTL cache for metric names; repeated calls within PROMETHEUS_CACHE_TTL (default 300s) return cached data without HTTP request
+4. Cache is thread-safe and invalidates correctly after TTL expiry
 
-**Dependencies:** None (builds on existing architecture)
+**Dependencies:** None (builds on existing client.py)
 
 **UI hint:** no
 
 ---
 
-## Phase 2: Reliability Hardening
+## Phase 5: Prometheus Status Tools
 
-**Goal:** Make the HTTP client production-ready for corporate environments with retry logic for transient failures and configurable timeouts.
+**Goal:** Add 4 new Prometheus tools for health checking, cardinality investigation, and runtime/build information — all using the existing PrometheusClient.
 
-**Requirements:** REL-01, REL-02
+**Requirements:** OPS-01, CARD-01, STAT-01, STAT-02
 
 **Success Criteria:**
-1. Transient HTTP errors (5xx, ConnectionError, Timeout) trigger one automatic retry with 1-second backoff before failing
-2. PROMETHEUS_TIMEOUT environment variable controls the HTTP request timeout (default remains 30s)
-3. Retry behavior is tested with mocked HTTP responses (5xx → success, 5xx → 5xx exhausted)
-4. PROMETHEUS_TIMEOUT is documented in .env.example, server.json, and errors.py config message
+1. `prometheus_health_check` tool returns health and readiness status from /-/healthy and /-/ready (note: management endpoints, not /api/v1)
+2. `prometheus_get_cardinality` tool returns TSDB stats including series count, top metrics by cardinality, top labels by value count from /api/v1/status/tsdb
+3. `prometheus_get_runtime_info` tool returns goroutine count, time series count, storage retention from /api/v1/status/runtimeinfo
+4. `prometheus_get_build_info` tool returns Prometheus version, Go version, revision from /api/v1/status/buildinfo
+5. All 4 tools have dual-channel output, read-only annotations, structured_output=True, and integration tests
 
-**Dependencies:** None (independent of Phase 1)
+**Dependencies:** Phase 4 (response size limits protect these new endpoints)
 
 **UI hint:** no
 
 ---
 
-## Phase 3: Test Quality
+## Phase 6: Alertmanager Integration
 
-**Goal:** Eliminate test fixture duplication and fill identified coverage gaps for untested code paths.
+**Goal:** Add AlertmanagerClient (separate from PrometheusClient) and 4 Alertmanager tools, enabling AI agents to investigate alert suppression, silences, and routing.
 
-**Requirements:** QUAL-01, QUAL-02, QUAL-03
+**Requirements:** AM-01, AM-02, AM-03, AM-04
 
 **Success Criteria:**
-1. tests/conftest.py contains the shared client-reset fixture, both test_tools_integration.py and test_mcp_client_cache.py use it
-2. Tests exercise prometheus_list_targets with state='dropped' and state='any' and verify correct response structure
-3. Tests cover PrometheusClient with custom timeout, empty HTTP response body, and verify session reuse across multiple get() calls
-4. All existing tests still pass (no regressions from refactoring)
+1. New `AlertmanagerClient` in `alertmanager_client.py` reads ALERTMANAGER_URL from env, supports Bearer/Basic auth (same pattern as PrometheusClient), uses Alertmanager API v2 base path
+2. `alertmanager_list_silences` tool returns silences with matchers, status, creator, comment from GET /api/v2/silences
+3. `alertmanager_list_alerts` tool returns alerts with suppressed/inhibited state, silence IDs from GET /api/v2/alerts
+4. `alertmanager_get_status` tool returns cluster status, version, config from GET /api/v2/status
+5. `alertmanager_list_alert_groups` tool returns alert groups with routing info from GET /api/v2/alerts/groups
 
-**Dependencies:** Phase 1, Phase 2 (new code from earlier phases needs test coverage too)
+**Dependencies:** Phase 4 (response size limits), Phase 5 (pattern established for new tool files)
 
 **UI hint:** no
 
 ---
 
-*Roadmap created: 2026-06-06*
-*Last updated: 2026-06-06 after initial creation*
+## Phase 7: v2.0 Test & Release Prep
+
+**Goal:** Ensure comprehensive test coverage for all v2.0 code, update protocol tests for all new tools, and prepare for release.
+
+**Requirements:** None (quality phase)
+
+**Success Criteria:**
+1. All new tools registered in test_protocol.py EXPECTED_TOOLS and pass schema validation
+2. Integration tests with mocked HTTP cover happy path and error paths for all new tools
+3. AlertmanagerClient has unit tests matching PrometheusClient test coverage
+4. Version bumped to 0.2.0 in pyproject.toml, __init__.py, server.json, and CHANGELOG.md updated
+
+**Dependencies:** Phase 4, Phase 5, Phase 6
+
+**UI hint:** no
+
+---
+
+*Roadmap created: 2026-06-08*
+*Last updated: 2026-06-08 after initial creation*

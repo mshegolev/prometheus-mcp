@@ -9,18 +9,20 @@
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** AI agents can autonomously investigate production errors by querying Prometheus
-**Current focus:** Defining requirements for v2.0
+**Current focus:** Phase 4 — Client Hardening
 
 ## Current Phase
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-06-08 — Milestone v2.0 started
+**Phase 4: Client Hardening** — Not Started
 
 ## Progress
 
-No phases defined yet.
+| Phase | Name | Status | Plans |
+|-------|------|--------|-------|
+| 4 | Client Hardening | Not Started | 0/0 |
+| 5 | Prometheus Status Tools | Not Started | 0/0 |
+| 6 | Alertmanager Integration | Not Started | 0/0 |
+| 7 | v2.0 Test & Release Prep | Not Started | 0/0 |
 
 ## Blockers / Concerns
 
@@ -28,8 +30,10 @@ None.
 
 ## Recent Activity
 
-- 2026-06-08: Milestone v2.0 started — Advanced Investigation & Operations
-- 2026-06-06: v1.0 milestone complete (3/3 phases, 8/8 requirements)
+- 2026-06-08: Roadmap approved — 4 phases, 10 requirements
+- 2026-06-08: Requirements defined (AM, CARD, OPS, STAT)
+- 2026-06-08: Research complete (Stack, Features, Architecture, Pitfalls)
+- 2026-06-08: Milestone v2.0 started
 
 ---
-*Last updated: 2026-06-08 after milestone v2.0 start*
+*Last updated: 2026-06-08 after roadmap approval*
