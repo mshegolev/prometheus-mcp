@@ -8,17 +8,17 @@ An MCP server that gives AI agents (Claude, Cursor, CI pipelines) read-only acce
 
 AI agents can autonomously investigate production errors and infrastructure issues by querying Prometheus metrics, metadata, labels, alerts, targets, rules, cardinality, and Alertmanager state — without human intervention or direct API knowledge.
 
-## Current Milestone: v2.0 Advanced Investigation & Operations
+## Current Milestone: v3.0 Federation
 
-**Goal:** Extend prometheus-mcp with advanced investigation tools (cardinality, Alertmanager, federation) and operational hardening (health checks, caching, response limits).
+**Goal:** Enable AI agents to investigate across multiple Prometheus and Alertmanager instances with per-instance configuration, authentication, and cross-cluster query fan-out.
 
 **Target features:**
-- Alertmanager silences and inhibitions
-- Metric series count and cardinality statistics
-- Federated queries across multiple Prometheus instances
-- Health check tool for container orchestrator liveness probes
-- Metric name caching with TTL for large Prometheus instances
-- HTTP response size limits for defense-in-depth
+- JSON config file for named Prometheus/Alertmanager instances
+- Per-instance authentication (Bearer token / Basic auth per instance)
+- Instance listing tool for agent discovery
+- Fan-out queries across multiple instances with __prometheus_instance__ labeling
+- Optional instance parameter added to existing tools for targeted queries
+- Alertmanager federation (multiple AM instances mapped to clusters)
 
 ## Requirements
 
@@ -40,15 +40,20 @@ AI agents can autonomously investigate production errors and infrastructure issu
 - ✓ HTTP retry logic for transient failures (v1.0)
 - ✓ Shared test fixtures in conftest.py (v1.0)
 - ✓ Comprehensive test coverage for untested paths (v1.0)
+- ✓ Alertmanager silences and inhibitions query (v2.0)
+- ✓ Metric series count and cardinality statistics (v2.0)
+- ✓ Health check tool for container orchestrator liveness probes (v2.0)
+- ✓ Metric name caching with TTL for large Prometheus instances (v2.0)
+- ✓ HTTP response size limits for defense-in-depth (v2.0)
 
 ### Active
 
-- [ ] Alertmanager silences and inhibitions query
-- [ ] Metric series count and cardinality statistics
-- [ ] Federated queries across multiple Prometheus instances
-- [ ] Health check tool for container orchestrator liveness probes
-- [ ] Metric name caching with TTL for large Prometheus instances
-- [ ] HTTP response size limits for defense-in-depth
+- [ ] JSON config file for named Prometheus/Alertmanager instances
+- [ ] Per-instance authentication (Bearer token / Basic auth per instance)
+- [ ] Instance listing tool for agent discovery
+- [ ] Fan-out queries across multiple instances with __prometheus_instance__ labeling
+- [ ] Optional instance parameter added to existing tools for targeted queries
+- [ ] Alertmanager federation (multiple AM instances mapped to clusters)
 
 ### Out of Scope
 
@@ -58,19 +63,20 @@ AI agents can autonomously investigate production errors and infrastructure issu
 
 ## Context
 
-- Existing codebase: ~1900 lines of production Python, 8 MCP tools, well-structured flat module layout
+- Existing codebase: ~2500 lines of production Python, 16 MCP tools (8 Prometheus + 4 status + 4 Alertmanager), flat module layout
 - Stack: Python 3.10+, FastMCP (mcp>=1.2), requests, Pydantic 2, Hatchling build
 - Architecture: Single-process stdio MCP server, synchronous tools in async runtime via worker threads
-- Client: PrometheusClient with retry logic and configurable timeout
-- Quality: 180 tests passing, ruff linting, CI on 3 Python versions
-- Published on PyPI as `prometheus-mcp` v0.1.0
+- Clients: PrometheusClient + AlertmanagerClient with retry logic, configurable timeout, response size limits, metric name caching
+- Quality: Tests passing, ruff linting, CI on 3 Python versions
+- Published on PyPI as `prometheus-mcp` v0.2.0
 
 ## Constraints
 
 - **Read-only**: All tools must remain read-only (GET requests only) — no mutations
 - **Backward compatibility**: Existing 8 tools must not change their API signatures or output schemas
 - **Python 3.10+**: Must support Python 3.10, 3.11, 3.12 (CI matrix)
-- **Minimal new deps**: Prefer stdlib/existing deps; new deps only where essential (e.g., Alertmanager may need separate client config)
+- **Minimal new deps**: Prefer stdlib/existing deps; new deps only where essential
+- **Backward compatible**: Single-instance mode via env vars must continue working; federation is opt-in via config file
 - **MCP protocol**: Must follow MCP conventions — stdio transport, structured output, tool annotations
 
 ## Key Decisions
@@ -82,7 +88,7 @@ AI agents can autonomously investigate production errors and infrastructure issu
 | Follow existing dual-channel output pattern | All tools should behave the same way | Applied (v1.0) |
 | Keep synchronous tool functions | Matches existing threading model | Applied (v1.0) |
 | Alertmanager as separate configurable URL | Different service, may not be deployed | Pending (v2.0) |
-| Federation via multi-URL config | Each Prometheus is a separate client | Pending (v2.0) |
+| Federation via JSON config file | Named instances with per-instance auth, fan-out queries | Pending (v3.0) |
 
 ## Evolution
 
@@ -102,4 +108,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-08 after milestone v2.0 start*
+*Last updated: 2026-06-08 after milestone v3.0 start*

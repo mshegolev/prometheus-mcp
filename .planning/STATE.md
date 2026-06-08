@@ -1,7 +1,7 @@
 # Project State
 
 **Project:** prometheus-mcp
-**Milestone:** v2.0
+**Milestone:** v3.0
 **Updated:** 2026-06-08
 
 ## Project Reference
@@ -9,20 +9,18 @@
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** AI agents can autonomously investigate production errors by querying Prometheus
-**Current focus:** All phases complete
+**Current focus:** Defining requirements
 
-## Current Phase
+## Current Position
 
-All 4 phases complete.
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-08 — Milestone v3.0 started
 
 ## Progress
 
-| Phase | Name | Status | Plans |
-|-------|------|--------|-------|
-| 4 | Client Hardening | Complete ✓ | 1/1 |
-| 5 | Prometheus Status Tools | Complete ✓ | 1/1 |
-| 6 | Alertmanager Integration | Complete ✓ | 1/1 |
-| 7 | v2.0 Test & Release Prep | Complete ✓ | 1/1 |
+No phases started yet.
 
 ## Blockers / Concerns
 
@@ -30,11 +28,8 @@ None.
 
 ## Recent Activity
 
-- 2026-06-08: Phase 7 complete — version bump to 0.2.0, CHANGELOG
-- 2026-06-08: Phase 6 complete — Alertmanager integration (4 tools)
-- 2026-06-08: Phase 5 complete — Prometheus status tools (4 tools)
-- 2026-06-08: Phase 4 complete — response size limits, metric caching
-- 2026-06-08: Milestone v2.0 started
+- 2026-06-08: Milestone v3.0 Federation started
+- 2026-06-08: v2.0 completed — all 4 phases shipped
 
 ---
-*Last updated: 2026-06-08 after all phases complete*
+*Last updated: 2026-06-08 after milestone v3.0 start*
