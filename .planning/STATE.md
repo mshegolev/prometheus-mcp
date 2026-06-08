@@ -1,27 +1,26 @@
 # Project State
 
 **Project:** prometheus-mcp
-**Milestone:** v1.0
-**Updated:** 2026-06-06
+**Milestone:** v2.0
+**Updated:** 2026-06-08
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-06)
+See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** AI agents can autonomously investigate production errors by querying Prometheus
-**Current focus:** All phases complete
+**Current focus:** Defining requirements for v2.0
 
 ## Current Phase
 
-All 3 phases complete.
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-08 — Milestone v2.0 started
 
 ## Progress
 
-| Phase | Name | Status | Plans |
-|-------|------|--------|-------|
-| 1 | Investigation Tools | Complete ✓ | 1/1 |
-| 2 | Reliability Hardening | Complete ✓ | 1/1 |
-| 3 | Test Quality | Complete ✓ | 1/1 |
+No phases defined yet.
 
 ## Blockers / Concerns
 
@@ -29,11 +28,8 @@ None.
 
 ## Recent Activity
 
-- 2026-06-06: Phase 3 complete — shared fixtures, dropped/any target tests, client behavior tests
-- 2026-06-06: Phase 2 complete — retry logic, configurable PROMETHEUS_TIMEOUT
-- 2026-06-06: Phase 1 complete — 3 new investigation tools (metadata, label values, rules)
-- 2026-06-06: Project initialized with 3 phases
-- 2026-06-06: Codebase mapped (7 documents in .planning/codebase/)
+- 2026-06-08: Milestone v2.0 started — Advanced Investigation & Operations
+- 2026-06-06: v1.0 milestone complete (3/3 phases, 8/8 requirements)
 
 ---
-*Last updated: 2026-06-06 after Phase 3 completion*
+*Last updated: 2026-06-08 after milestone v2.0 start*

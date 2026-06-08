@@ -2,69 +2,87 @@
 
 ## What This Is
 
-An MCP server that gives AI agents (Claude, Cursor, CI pipelines) read-only access to Prometheus for autonomous error investigation in corporate networks. Used by SRE, DevOps, QA, testing, analytics, architecture teams, and automated CI/CD pipelines to query metrics, inspect alerts, explore targets, and investigate incidents — all through the Model Context Protocol over stdio.
+An MCP server that gives AI agents (Claude, Cursor, CI pipelines) read-only access to Prometheus and Alertmanager for autonomous error investigation in corporate networks. Used by SRE, DevOps, QA, testing, analytics, architecture teams, and automated CI/CD pipelines to query metrics, inspect alerts, explore targets, investigate incidents, and monitor cardinality — all through the Model Context Protocol over stdio.
 
 ## Core Value
 
-AI agents can autonomously investigate production errors and infrastructure issues by querying Prometheus metrics, metadata, labels, alerts, targets, and rules — without human intervention or direct API knowledge.
+AI agents can autonomously investigate production errors and infrastructure issues by querying Prometheus metrics, metadata, labels, alerts, targets, rules, cardinality, and Alertmanager state — without human intervention or direct API knowledge.
+
+## Current Milestone: v2.0 Advanced Investigation & Operations
+
+**Goal:** Extend prometheus-mcp with advanced investigation tools (cardinality, Alertmanager, federation) and operational hardening (health checks, caching, response limits).
+
+**Target features:**
+- Alertmanager silences and inhibitions
+- Metric series count and cardinality statistics
+- Federated queries across multiple Prometheus instances
+- Health check tool for container orchestrator liveness probes
+- Metric name caching with TTL for large Prometheus instances
+- HTTP response size limits for defense-in-depth
 
 ## Requirements
 
 ### Validated
 
-- ✓ List metric names with optional substring filter — existing (`prometheus_list_metrics`)
-- ✓ Execute instant PromQL queries — existing (`prometheus_query`)
-- ✓ Execute range PromQL queries with time-series data — existing (`prometheus_query_range`)
-- ✓ List active and pending alerts — existing (`prometheus_list_alerts`)
-- ✓ List scrape targets by health and job — existing (`prometheus_list_targets`)
-- ✓ Dual-channel output (markdown + structured JSON) — existing
-- ✓ Bearer token and HTTP Basic authentication — existing
-- ✓ LLM-readable actionable error messages — existing
-- ✓ Docker container support — existing
+- ✓ List metric names with optional substring filter — `prometheus_list_metrics`
+- ✓ Execute instant PromQL queries — `prometheus_query`
+- ✓ Execute range PromQL queries with time-series data — `prometheus_query_range`
+- ✓ List active and pending alerts — `prometheus_list_alerts`
+- ✓ List scrape targets by health and job — `prometheus_list_targets`
+- ✓ Dual-channel output (markdown + structured JSON)
+- ✓ Bearer token and HTTP Basic authentication
+- ✓ LLM-readable actionable error messages
+- ✓ Docker container support
+- ✓ Metric metadata introspection (HELP, TYPE, UNIT) — `prometheus_get_metric_metadata` (v1.0)
+- ✓ Label value discovery for query building — `prometheus_list_label_values` (v1.0)
+- ✓ Recording and alerting rule inspection — `prometheus_list_rules` (v1.0)
+- ✓ Configurable HTTP timeout via PROMETHEUS_TIMEOUT (v1.0)
+- ✓ HTTP retry logic for transient failures (v1.0)
+- ✓ Shared test fixtures in conftest.py (v1.0)
+- ✓ Comprehensive test coverage for untested paths (v1.0)
 
 ### Active
 
-- [ ] Metric metadata introspection (HELP text, TYPE, UNIT)
-- [ ] Label value discovery for query building
-- [ ] Recording and alerting rule inspection
-- [ ] Configurable HTTP timeout via environment variable
-- [ ] HTTP retry logic for transient failures
-- [ ] Shared test fixtures in conftest.py
-- [ ] Comprehensive test coverage for untested paths
+- [ ] Alertmanager silences and inhibitions query
+- [ ] Metric series count and cardinality statistics
+- [ ] Federated queries across multiple Prometheus instances
+- [ ] Health check tool for container orchestrator liveness probes
+- [ ] Metric name caching with TTL for large Prometheus instances
+- [ ] HTTP response size limits for defense-in-depth
 
 ### Out of Scope
 
 - Write operations to Prometheus — read-only by design
-- Alertmanager integration — separate MCP server concern
 - Custom PromQL query builder — agents should write PromQL directly
 - UI/frontend — this is a headless MCP server
-- Multi-Prometheus federation — single instance per server process
 
 ## Context
 
-- Existing codebase: ~1100 lines of production Python, 5 MCP tools, well-structured flat module layout
+- Existing codebase: ~1900 lines of production Python, 8 MCP tools, well-structured flat module layout
 - Stack: Python 3.10+, FastMCP (mcp>=1.2), requests, Pydantic 2, Hatchling build
 - Architecture: Single-process stdio MCP server, synchronous tools in async runtime via worker threads
-- Key gap: No metric metadata, label discovery, or rule inspection — agents must guess metric types and label values
-- Quality: Good test coverage (~1350 lines of tests), ruff linting, CI on 3 Python versions
+- Client: PrometheusClient with retry logic and configurable timeout
+- Quality: 180 tests passing, ruff linting, CI on 3 Python versions
 - Published on PyPI as `prometheus-mcp` v0.1.0
 
 ## Constraints
 
-- **Read-only**: All tools must remain read-only (GET requests only) — no mutations to Prometheus
-- **Backward compatibility**: Existing 5 tools must not change their API signatures or output schemas
+- **Read-only**: All tools must remain read-only (GET requests only) — no mutations
+- **Backward compatibility**: Existing 8 tools must not change their API signatures or output schemas
 - **Python 3.10+**: Must support Python 3.10, 3.11, 3.12 (CI matrix)
-- **No new runtime deps**: Prefer stdlib/existing deps (requests, pydantic) over new packages
+- **Minimal new deps**: Prefer stdlib/existing deps; new deps only where essential (e.g., Alertmanager may need separate client config)
 - **MCP protocol**: Must follow MCP conventions — stdio transport, structured output, tool annotations
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Add new tools (not modify existing) | Backward compatibility for current users | — Pending |
-| Use existing PrometheusClient for new endpoints | Consistency, connection pooling reuse | — Pending |
-| Follow existing dual-channel output pattern | All tools should behave the same way | — Pending |
-| Keep synchronous tool functions | Matches existing threading model | — Pending |
+| Add new tools (not modify existing) | Backward compatibility | Applied (v1.0) |
+| Use existing PrometheusClient for new endpoints | Consistency, connection pooling reuse | Applied (v1.0) |
+| Follow existing dual-channel output pattern | All tools should behave the same way | Applied (v1.0) |
+| Keep synchronous tool functions | Matches existing threading model | Applied (v1.0) |
+| Alertmanager as separate configurable URL | Different service, may not be deployed | Pending (v2.0) |
+| Federation via multi-URL config | Each Prometheus is a separate client | Pending (v2.0) |
 
 ## Evolution
 
@@ -84,4 +102,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-06 after initialization*
+*Last updated: 2026-06-08 after milestone v2.0 start*
