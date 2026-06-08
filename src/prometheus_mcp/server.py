@@ -5,6 +5,7 @@ from __future__ import annotations
 # Importing the tools module attaches @mcp.tool decorators to the shared
 # FastMCP instance.
 from prometheus_mcp import tools as _tools  # noqa: F401
+from prometheus_mcp import tools_status as _tools_status  # noqa: F401
 from prometheus_mcp._mcp import app_lifespan, mcp
 
 

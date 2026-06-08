@@ -180,3 +180,57 @@ class ListRulesOutput(TypedDict):
     recording_count: int
     alerting_count: int
     groups: list[RuleGroupItem]
+
+
+# ── Health check ─────────────────────────────────────────────────────────────
+
+
+class HealthCheckOutput(TypedDict):
+    healthy: bool
+    healthy_status_code: int
+    ready: bool
+    ready_status_code: int
+
+
+# ── Cardinality / TSDB stats ────────────────────────────────────────────────
+
+
+class CardinalityTopItem(TypedDict):
+    name: str
+    value: int
+
+
+class CardinalityOutput(TypedDict):
+    num_series: int
+    num_label_pairs: int
+    chunk_count: int
+    min_time: int
+    max_time: int
+    top_metrics_by_series: list[CardinalityTopItem]
+    top_labels_by_value_count: list[CardinalityTopItem]
+    top_labels_by_memory_bytes: list[CardinalityTopItem]
+
+
+# ── Runtime info ─────────────────────────────────────────────────────────────
+
+
+class RuntimeInfoOutput(TypedDict):
+    start_time: str
+    goroutine_count: int
+    time_series_count: int
+    storage_retention: str
+    corruptionCount: int
+    reloadConfigSuccess: bool
+    lastConfigTime: str
+
+
+# ── Build info ───────────────────────────────────────────────────────────────
+
+
+class BuildInfoOutput(TypedDict):
+    version: str
+    revision: str
+    branch: str
+    buildUser: str
+    buildDate: str
+    goVersion: str

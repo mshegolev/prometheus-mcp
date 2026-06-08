@@ -19,6 +19,7 @@ import pytest
 
 # Importing tools attaches @mcp.tool decorators.
 import prometheus_mcp.tools  # noqa: F401
+import prometheus_mcp.tools_status  # noqa: F401
 from prometheus_mcp._mcp import mcp
 
 EXPECTED_TOOLS: dict[str, dict[str, Any]] = {
@@ -78,6 +79,34 @@ EXPECTED_TOOLS: dict[str, dict[str, Any]] = {
         "required_params": set(),
         "optional_params": {"type"},
     },
+    "prometheus_health_check": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": set(),
+    },
+    "prometheus_get_cardinality": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": set(),
+    },
+    "prometheus_get_runtime_info": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": set(),
+    },
+    "prometheus_get_build_info": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": set(),
+    },
 }
 
 
@@ -87,7 +116,7 @@ def listed_tools() -> list[Any]:
     return asyncio.run(mcp.list_tools())
 
 
-def test_all_eight_tools_registered(listed_tools: list[Any]) -> None:
+def test_all_twelve_tools_registered(listed_tools: list[Any]) -> None:
     names = {t.name for t in listed_tools}
     assert names == set(EXPECTED_TOOLS), (
         f"tool list mismatch.\n  registered: {sorted(names)}\n  expected:   {sorted(EXPECTED_TOOLS)}"
