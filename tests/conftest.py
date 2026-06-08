@@ -39,7 +39,7 @@ def reset_client_cache() -> Generator[None, None, None]:
 
 
 def _do_reset() -> None:
-    """Close the cached client (if any), clear client and metrics caches."""
+    """Close the cached clients (if any), clear client and metrics caches."""
     with _mcp._client_lock:
         if _mcp._client is not None:
             try:
@@ -47,5 +47,12 @@ def _do_reset() -> None:
             except Exception:
                 pass
         _mcp._client = None
+    with _mcp._am_client_lock:
+        if _mcp._am_client is not None:
+            try:
+                _mcp._am_client.close()
+            except Exception:
+                pass
+        _mcp._am_client = None
     # Clear the metrics TTL cache to prevent cross-test contamination.
     get_metrics_cache().clear()

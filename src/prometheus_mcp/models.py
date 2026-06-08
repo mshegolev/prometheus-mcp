@@ -234,3 +234,84 @@ class BuildInfoOutput(TypedDict):
     buildUser: str
     buildDate: str
     goVersion: str
+
+
+# ── Alertmanager silences ────────────────────────────────────────────────────
+
+
+class SilenceMatcher(TypedDict):
+    name: str
+    value: str
+    isRegex: bool
+    isEqual: bool
+
+
+class SilenceItem(TypedDict):
+    id: str
+    status: str
+    matchers: list[SilenceMatcher]
+    createdBy: str
+    comment: str
+    startsAt: str
+    endsAt: str
+    updatedAt: str
+
+
+class ListSilencesOutput(TypedDict):
+    total_count: int
+    active_count: int
+    pending_count: int
+    expired_count: int
+    silences: list[SilenceItem]
+
+
+# ── Alertmanager alerts ──────────────────────────────────────────────────────
+
+
+class AMAlertStatus(TypedDict):
+    state: str
+    silencedBy: list[str]
+    inhibitedBy: list[str]
+
+
+class AMAlertItem(TypedDict):
+    labels: dict[str, str]
+    annotations: dict[str, str]
+    status: AMAlertStatus
+    startsAt: str
+    endsAt: str
+    generatorURL: str
+    fingerprint: str
+
+
+class ListAMAlertsOutput(TypedDict):
+    total_count: int
+    active_count: int
+    suppressed_count: int
+    unprocessed_count: int
+    alerts: list[AMAlertItem]
+
+
+# ── Alertmanager status ──────────────────────────────────────────────────────
+
+
+class AMStatusOutput(TypedDict):
+    cluster_status: str
+    version_info: dict[str, str]
+    uptime: str
+    config_yaml: str
+
+
+# ── Alertmanager alert groups ────────────────────────────────────────────────
+
+
+class AMAlertGroupItem(TypedDict):
+    labels: dict[str, str]
+    receiver: str
+    alert_count: int
+
+
+class ListAMAlertGroupsOutput(TypedDict):
+    total_groups: int
+    total_alerts: int
+    groups: list[AMAlertGroupItem]
