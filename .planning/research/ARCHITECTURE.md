@@ -1,801 +1,1109 @@
-# Architecture Patterns
+# Architecture: Federation Integration
 
-**Domain:** Prometheus MCP Server v2.0 — feature integration architecture
+**Domain:** Multi-instance Prometheus/Alertmanager federation for MCP server
 **Researched:** 2026-06-08
-**Confidence:** HIGH (based on direct codebase analysis + Prometheus/Alertmanager API docs)
+**Overall confidence:** HIGH (analysis based on reading every line of existing codebase — all 14 source files, all test fixtures, pyproject.toml)
 
-## Current Architecture Snapshot
+## Executive Summary
 
-```
-┌────────────────────────────────────────────────────────────────┐
-│  MCP Client (Claude, Cursor, CI)                               │
-│  ← stdio →                                                     │
-├────────────────────────────────────────────────────────────────┤
-│  FastMCP runtime (async event loop)                            │
-│  ├── anyio.to_thread.run_sync → sync tool functions            │
-│  └── lifespan: startup/shutdown hook                           │
-├────────────────────────────────────────────────────────────────┤
-│  server.py       │ Entry point, imports tools to register them │
-│  _mcp.py         │ FastMCP instance, get_client() singleton    │
-│  tools.py        │ 8 @mcp.tool functions (all synchronous)     │
-│  client.py       │ PrometheusClient: requests Session + retry  │
-│  models.py       │ TypedDict output schemas                    │
-│  output.py       │ ok() / fail() dual-channel helpers          │
-│  errors.py       │ HTTP error → actionable message mapping     │
-└────────────────────────────────────────────────────────────────┘
-         │
-         ▼
-    Prometheus HTTP API v1 (single instance)
-```
+Federation adds a new conceptual layer — **instance routing** — between the MCP tool surface and the HTTP clients. Today each tool calls `get_client()` → gets the single `PrometheusClient` → makes one HTTP call. Federation changes this to: each tool calls a **resolver** → gets one or many clients → fans out HTTP calls → merges results. The critical design constraint is **backward compatibility**: when no config file is present, the server must behave identically to v0.2.0.
 
-**Key invariants to preserve:**
-- All tools are synchronous `def` (FastMCP dispatches to worker threads)
-- `get_client()` returns a thread-safe singleton PrometheusClient
-- Every tool returns `output.ok(TypedDict, markdown)` or calls `output.fail(exc, action)`
-- All operations are read-only (GET only)
-- `models.py` TypedDict schemas drive `structured_output=True`
+The architecture introduces 4 new modules (`config.py`, `registry.py`, `federation.py`, `tools_federation.py`) and modifies 2 existing modules (`_mcp.py`, `models.py`). Existing tool modules (`tools.py`, `tools_status.py`, `tools_alertmanager.py`) gain an optional `instance` parameter but their core logic is unchanged — the routing happens below them in the resolver layer.
 
-## Recommended Architecture for v2.0
+## Current Architecture (As-Is)
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  MCP Client (Claude, Cursor, CI)                               │
-│  ← stdio →                                                     │
-├────────────────────────────────────────────────────────────────┤
-│  FastMCP runtime (async event loop)                            │
-│  ├── anyio.to_thread.run_sync → sync tool functions            │
-│  └── lifespan: startup/shutdown (close all clients + cache)    │
-├────────────────────────────────────────────────────────────────┤
-│  server.py             │ Entry point (unchanged)               │
-│  _mcp.py               │ + get_alertmanager_client()           │
-│                        │ + get_federation_clients()            │
-│                        │ + lifespan closes new clients         │
-│  tools.py              │ Existing 8 tools (UNCHANGED)          │
-│  tools_alertmanager.py │ NEW: 2 Alertmanager tools             │
-│  tools_cardinality.py  │ NEW: 1-2 cardinality tools            │
-│  tools_federation.py   │ NEW: 1-2 federation tools             │
-│  tools_health.py       │ NEW: 1 health check tool              │
-│  client.py             │ + response size guard in _request()   │
-│  alertmanager_client.py│ NEW: AlertmanagerClient (same pattern) │
-│  cache.py              │ NEW: TTLCache for metric names         │
-│  models.py             │ + new TypedDict schemas                │
-│  output.py             │ (unchanged)                            │
-│  errors.py             │ + Alertmanager error handling           │
-└────────────────────────────────────────────────────────────────┘
-         │                          │                    │
-         ▼                          ▼                    ▼
-    Prometheus API v1         Alertmanager API     Prometheus #2..N
-    (primary instance)        (separate service)   (federation targets)
+┌─────────────────────────────────────────────────────────┐
+│  MCP Client (Claude, Cursor, CI pipeline)                │
+│  ← stdio transport →                                     │
+├─────────────────────────────────────────────────────────┤
+│  FastMCP runtime (async event loop)                      │
+│  anyio.to_thread.run_sync → synchronous tool functions   │
+│  lifespan: startup/shutdown hook (app_lifespan)          │
+├─────────────────────────────────────────────────────────┤
+│  server.py       │ Entry point, imports tool modules     │
+│  _mcp.py         │ FastMCP instance, get_client() →      │
+│                  │   singleton PrometheusClient           │
+│                  │ get_alertmanager_client() →            │
+│                  │   singleton AlertmanagerClient         │
+│                  │ app_lifespan → close sessions          │
+│  tools.py        │ 8 @mcp.tool: query, range, alerts,   │
+│                  │   targets, metrics, metadata, labels, │
+│                  │   rules                                │
+│  tools_status.py │ 4 @mcp.tool: health, cardinality,    │
+│                  │   runtime info, build info             │
+│  tools_alertmanager.py │ 4 @mcp.tool: silences, AM      │
+│                  │   alerts, AM status, alert groups      │
+│  client.py       │ PrometheusClient: requests.Session,   │
+│                  │   retry logic, size limits, env config │
+│  alertmanager_   │ AlertmanagerClient: same pattern,     │
+│    client.py     │   API v2, env config                  │
+│  cache.py        │ TTLCache: singleton, metric names     │
+│  models.py       │ TypedDict output schemas (all tools)  │
+│  output.py       │ ok() / fail() dual-channel helpers    │
+│  errors.py       │ HTTP error → actionable LLM messages  │
+└─────────────────────────────────────────────────────────┘
+         │                            │
+         ▼                            ▼
+    Prometheus HTTP API v1      Alertmanager API v2
+    (single instance)           (single instance)
 ```
 
-## Component-by-Component Integration Plan
+**Key structural facts from code analysis:**
 
-### 1. Response Size Limits — MODIFY `client.py`
+1. **Single-client singletons.** `_mcp.py` (line 18-23) holds `_client: PrometheusClient | None` and `_am_client: AlertmanagerClient | None` as module globals with thread-safe lazy init via `threading.Lock()`.
 
-**What changes:** Add a response size guard inside `PrometheusClient._request()`.
+2. **Config via env vars exclusively.** `PrometheusClient.__init__()` reads `PROMETHEUS_URL`, `PROMETHEUS_TOKEN`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`, `PROMETHEUS_SSL_VERIFY`, `PROMETHEUS_TIMEOUT`, `PROMETHEUS_MAX_RESPONSE_BYTES`. `AlertmanagerClient` reads `ALERTMANAGER_URL` + its own auth vars. No config file.
 
-**Why here:** Every HTTP response flows through `_request()`. Guarding at this layer protects all existing and future tools without per-tool changes.
+3. **Synchronous tools in async runtime.** All 16 `@mcp.tool` functions are `def` (not `async def`). FastMCP runs them in worker threads via `anyio.to_thread.run_sync`. Each tool invocation already runs in its own thread.
 
-**Implementation:**
+4. **Clients are already parameterized.** `PrometheusClient.__init__` accepts `url`, `token`, `username`, `password`, `ssl_verify`, `timeout`, `max_response_bytes` — all with env-var fallbacks. This means we can create multiple instances with different configs without modifying the class.
+
+5. **Dual-channel output.** Every tool returns `output.ok(result_dict, markdown_string)` → `CallToolResult(content=[TextContent(...)], structuredContent=dict(...))`.
+
+6. **Lifespan manages cleanup.** `app_lifespan()` is an async context manager that closes client sessions on shutdown.
+
+7. **Metric caching is singleton-based.** `cache.py` provides a global `TTLCache` keyed by fixed string `"__name__values"` — not per-instance.
+
+8. **No client abstraction layer.** Tools call `get_client()` → `client.get("/query", params=...)` directly. There is no service layer between tools and HTTP clients.
+
+## Target Architecture (To-Be)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  MCP Client (Claude, Cursor, CI pipeline)                    │
+│  ← stdio transport →                                         │
+├─────────────────────────────────────────────────────────────┤
+│  FastMCP runtime (unchanged)                                 │
+├─────────────────────────────────────────────────────────────┤
+│  server.py (+ import tools_federation)                       │
+│                                                              │
+│  _mcp.py (MODIFIED)                                          │
+│  ├── get_registry() → InstanceRegistry singleton             │
+│  ├── get_client(instance?) → routes through registry         │
+│  ├── get_alertmanager_client(instance?) → routes through     │
+│  │   registry                                                │
+│  └── app_lifespan → loads config, creates registry,          │
+│      closes ALL sessions on shutdown                         │
+│                                                              │
+│  tools.py (MODIFIED — add instance param to 8 tools)         │
+│  tools_status.py (MODIFIED — add instance param to 4 tools)  │
+│  tools_alertmanager.py (MODIFIED — add instance to 4 tools)  │
+│  tools_federation.py (NEW — federation_list_instances)        │
+│                                                              │
+│  config.py (NEW) ──→ registry.py (NEW) ──→ federation.py(NEW)│
+│  │ parse JSON config  │ manage N client    │ fan_out()       │
+│  │ validate instances  │ pairs + caches    │ merge_*()       │
+│  │ apply defaults      │ lifecycle         │ ThreadPool      │
+│                                                              │
+│  client.py (UNCHANGED)                                       │
+│  alertmanager_client.py (UNCHANGED)                          │
+│  cache.py (UNCHANGED — TTLCache instances reused per-entry)  │
+│  models.py (MODIFIED — add federation output types)          │
+│  output.py (UNCHANGED)                                       │
+│  errors.py (MODIFIED — add federation error messages)        │
+└─────────────────────────────────────────────────────────────┘
+         │                    │                   │
+         ▼                    ▼                   ▼
+    Prometheus #1        Prometheus #2      Alertmanager #1
+    (us-west)            (eu-central)       (us-west)
+         │                                        │
+         ▼                                        ▼
+    Alertmanager #1                         Alertmanager #2
+    (mapped to us-west)                     (mapped to eu-central)
+```
+
+## New Components
+
+### 1. `config.py` — Configuration Loading
+
+**Purpose:** Parse and validate the JSON config file describing named instances.
+
+**Config file schema:**
+```json
+{
+  "instances": {
+    "us-west": {
+      "prometheus_url": "https://prom-usw.corp.example.com",
+      "prometheus_token": "...",
+      "alertmanager_url": "https://am-usw.corp.example.com",
+      "alertmanager_token": "...",
+      "ssl_verify": true,
+      "timeout": 30,
+      "max_response_bytes": 10485760
+    },
+    "eu-central": {
+      "prometheus_url": "https://prom-eu.corp.example.com",
+      "prometheus_username": "reader",
+      "prometheus_password": "...",
+      "ssl_verify": false
+    }
+  },
+  "defaults": {
+    "timeout": 30,
+    "ssl_verify": true,
+    "max_response_bytes": 10485760
+  }
+}
+```
+
+**Design decisions:**
+
+| Decision | Rationale |
+|----------|-----------|
+| JSON (not YAML) | Zero new dependencies — `json` is stdlib. YAML would require `pyyaml`. PROJECT.md constraint: "Minimal new deps." |
+| `defaults` section | Avoids repeating timeout/SSL for every instance. Per-instance values override defaults. |
+| Auth fields mirror env var names (lowercased) | Muscle memory — users already know `PROMETHEUS_TOKEN` → `prometheus_token`. |
+| Alertmanager optional per instance | Many setups have Prometheus without Alertmanager (current code: `AlertmanagerClient` raises `ConfigError` if URL missing). |
+| Config file path via `PROMETHEUS_MCP_CONFIG` env var | Consistent with existing env-var config pattern. Empty/unset = no federation = legacy single-instance mode. |
+
+**Loading strategy: at startup (in lifespan), not lazy.**
+
+Rationale: Config errors (bad JSON, missing URLs) must fail fast at startup, not on first tool call mid-investigation. The lifespan already runs before any tool invocation. Loading during lifespan means the registry is ready before any worker thread touches it — no need for double-checked locking on the registry itself.
 
 ```python
-# In client.py
-
-_DEFAULT_MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MB default
-
-class PrometheusClient:
-    def __init__(self, ..., max_response_bytes: int | None = None):
-        # ... existing init ...
-        if max_response_bytes is None:
-            env_val = os.environ.get("PROMETHEUS_MAX_RESPONSE_BYTES", "")
-            if env_val:
-                max_response_bytes = int(env_val)
-            else:
-                max_response_bytes = _DEFAULT_MAX_RESPONSE_BYTES
-        self.max_response_bytes = max_response_bytes
-
-    def _request(self, method, endpoint, *, params=None):
-        # ... existing retry logic ...
-        response = self.session.request(...)
-        # SIZE GUARD — check Content-Length header first (fast path),
-        # fall back to len(response.content) for chunked responses
-        content_length = response.headers.get("Content-Length")
-        if content_length and int(content_length) > self.max_response_bytes:
-            raise ResponseTooLargeError(
-                f"Response for {endpoint} is {int(content_length)} bytes "
-                f"(limit: {self.max_response_bytes}). Narrow your query."
-            )
-        if len(response.content) > self.max_response_bytes:
-            raise ResponseTooLargeError(...)
-        response.raise_for_status()
-        return response
-```
-
-**New error class in `errors.py`:**
-```python
-class ResponseTooLargeError(Exception):
-    """Response exceeded PROMETHEUS_MAX_RESPONSE_BYTES."""
-```
-
-Add corresponding handler in `errors.handle()` with actionable message telling the agent to narrow its query.
-
-**Env var:** `PROMETHEUS_MAX_RESPONSE_BYTES` (default: 50MB, 0 = unlimited)
-
-**Impact on existing code:** Minimal — adds a check before `raise_for_status()`. Existing tools unchanged. Error surfaces through existing `output.fail()` path.
-
-**Build order priority:** **FIRST** — protects all subsequent tools.
-
----
-
-### 2. Metric Name Caching — NEW `cache.py`, MODIFY `tools.py`
-
-**What changes:** New `cache.py` module with a simple TTL cache. Modify `prometheus_list_metrics` to cache the full metric name list.
-
-**Why a new module:** Cache logic is reusable (federation may need it too), and `tools.py` is already 1055 lines.
-
-**Implementation:**
-
-```python
-# cache.py — NEW FILE
-
-import threading
-import time
+# config.py — key types
+from dataclasses import dataclass, field
 from typing import Any
 
-_DEFAULT_CACHE_TTL = 300  # 5 minutes
+@dataclass(frozen=True)
+class InstanceConfig:
+    name: str
+    prometheus_url: str
+    prometheus_token: str = ""
+    prometheus_username: str = ""
+    prometheus_password: str = ""
+    alertmanager_url: str = ""
+    alertmanager_token: str = ""
+    alertmanager_username: str = ""
+    alertmanager_password: str = ""
+    ssl_verify: bool = True
+    timeout: float = 30.0
+    max_response_bytes: int = 10 * 1024 * 1024
 
+@dataclass(frozen=True)
+class FederationConfig:
+    instances: dict[str, InstanceConfig]
+    defaults: dict[str, Any] = field(default_factory=dict)
 
-class TTLCache:
-    """Thread-safe TTL cache for expensive Prometheus lookups.
-
-    Designed for metric name lists on large instances (100K+ metrics)
-    where /label/__name__/values takes seconds.
+def load_config(path: str) -> FederationConfig:
+    """Parse JSON config file, apply defaults, validate URLs.
+    
+    Raises ConfigError on missing file, invalid JSON, or missing required fields.
     """
-
-    def __init__(self, ttl: float | None = None):
-        env_ttl = os.environ.get("PROMETHEUS_CACHE_TTL", "")
-        self.ttl = ttl or (float(env_ttl) if env_ttl else _DEFAULT_CACHE_TTL)
-        self._store: dict[str, tuple[float, Any]] = {}
-        self._lock = threading.Lock()
-
-    def get(self, key: str) -> Any | None:
-        with self._lock:
-            entry = self._store.get(key)
-            if entry is None:
-                return None
-            expires_at, value = entry
-            if time.monotonic() > expires_at:
-                del self._store[key]
-                return None
-            return value
-
-    def set(self, key: str, value: Any) -> None:
-        with self._lock:
-            self._store[key] = (time.monotonic() + self.ttl, value)
-
-    def invalidate(self, key: str | None = None) -> None:
-        with self._lock:
-            if key is None:
-                self._store.clear()
-            else:
-                self._store.pop(key, None)
-```
-
-**Integration in `_mcp.py`:** Add a `get_cache()` singleton alongside `get_client()`. Clean up in lifespan.
-
-**Integration in `tools.py`:** `prometheus_list_metrics` checks cache before hitting Prometheus. Cache stores the raw `list[str]` from `/label/__name__/values`. Pattern filtering happens client-side on cached data (already the current design).
-
-**Env var:** `PROMETHEUS_CACHE_TTL` (default: 300s, 0 = disabled)
-
-**Impact on existing code:** `prometheus_list_metrics` gains a cache-hit fast path. Output unchanged. No API signature change.
-
-**Build order priority:** **SECOND** — enables caching pattern reused by federation.
-
----
-
-### 3. Health Check Tool — NEW `tools_health.py`
-
-**What changes:** New tool file with a single `prometheus_health_check` tool.
-
-**Why a new file:** Keeps `tools.py` (existing 8 tools) frozen. Health check is operationally distinct — used by k8s probes, not by agents investigating metrics.
-
-**Implementation:**
-
-```python
-# tools_health.py — NEW FILE
-
-@mcp.tool(
-    name="prometheus_health_check",
-    annotations={"title": "Health Check", "readOnlyHint": True, ...},
-    structured_output=True,
-)
-def prometheus_health_check() -> HealthCheckOutput:
-    """Check connectivity to Prometheus (and optionally Alertmanager).
-
-    Designed for container orchestrator liveness probes and agent
-    pre-flight checks. Hits GET /-/healthy on each configured endpoint.
-    """
-    results = {}
-    # Check Prometheus
-    try:
-        client = get_client()
-        # Use /-/healthy (returns 200 OK with "Prometheus Server is Healthy.")
-        # This is NOT under /api/v1, so we need raw session access
-        resp = client.session.get(
-            f"{client.url}/-/healthy", timeout=5
-        )
-        results["prometheus"] = {
-            "healthy": resp.status_code == 200,
-            "status_code": resp.status_code,
-            "url": client.url,
-        }
-    except Exception as exc:
-        results["prometheus"] = {"healthy": False, "error": str(exc), ...}
-
-    # Check Alertmanager if configured
-    try:
-        am_client = get_alertmanager_client()
-        if am_client is not None:
-            resp = am_client.session.get(
-                f"{am_client.url}/-/healthy", timeout=5
-            )
-            results["alertmanager"] = {"healthy": ..., ...}
-    except Exception:
-        ...
-
-    return output.ok(result, md)
-```
-
-**New model in `models.py`:**
-```python
-class ServiceHealth(TypedDict):
-    healthy: bool
-    status_code: int | None
-    url: str
-    error: str | None
-
-class HealthCheckOutput(TypedDict):
-    overall_healthy: bool
-    services: dict[str, ServiceHealth]
-```
-
-**Note on `/-/healthy`:** This endpoint is outside `/api/v1`, so the tool needs to access `client.url` directly (not `client.api_url`). The existing `client.session` already has auth headers set, so this works. Consider adding a `health_check()` method to PrometheusClient rather than reaching into `session` directly.
-
-**Integration in `server.py`:** Add `from prometheus_mcp import tools_health as _tools_health  # noqa: F401` alongside the existing tools import.
-
-**Build order priority:** **THIRD** — depends on nothing, but Alertmanager health check depends on #4.
-
----
-
-### 4. Alertmanager Client + Tools — NEW `alertmanager_client.py`, NEW `tools_alertmanager.py`
-
-**What changes:** New HTTP client for Alertmanager API v2, new tool module with 2 tools.
-
-**Why separate client:** Alertmanager is a different service at a different URL. Its API is v2 (not v1 like Prometheus) and returns different JSON shapes. Reusing PrometheusClient would require awkward conditional logic. Instead, create AlertmanagerClient following the same structural pattern (requests.Session, retry, auth, env-var config) but with its own URL and API prefix.
-
-**New env vars:**
-- `ALERTMANAGER_URL` (required for Alertmanager tools, optional for the server)
-- `ALERTMANAGER_TOKEN`, `ALERTMANAGER_USERNAME`, `ALERTMANAGER_PASSWORD` (optional, defaults to Prometheus credentials if unset)
-- `ALERTMANAGER_SSL_VERIFY` (optional, defaults to PROMETHEUS_SSL_VERIFY)
-- `ALERTMANAGER_TIMEOUT` (optional, defaults to PROMETHEUS_TIMEOUT)
-
-**AlertmanagerClient pattern (alertmanager_client.py):**
-
-```python
-class AlertmanagerClient:
-    """Minimal Alertmanager HTTP API v2 client.
-
-    Follows the same pattern as PrometheusClient: env-var config,
-    requests.Session, retry, auth priority (Bearer > Basic > none).
-    """
-
-    def __init__(self, url=None, ...):
-        raw_url = url or os.environ.get("ALERTMANAGER_URL", "")
-        if not raw_url:
-            raise ConfigError("ALERTMANAGER_URL is not set")
-        self.url = _validate_url(raw_url)
-        self.api_url = f"{self.url}/api/v2"
-        # ... same session setup pattern as PrometheusClient ...
-
-    def get(self, endpoint, params=None) -> Any:
-        # Same as PrometheusClient.get() but against api/v2
-        ...
-```
-
-**Consider extracting a base class:** PrometheusClient and AlertmanagerClient share ~70% of their `__init__` code (session setup, auth, SSL, retry). A `BaseHTTPClient` abstract class would reduce duplication:
-
-```python
-class BaseHTTPClient:
-    """Common HTTP client logic: session, auth, retry, timeout."""
-    def __init__(self, url, api_prefix, env_prefix, ...): ...
-    def get(self, endpoint, params=None): ...
-    def _request(self, method, endpoint, *, params=None): ...
-    def close(self): ...
-
-class PrometheusClient(BaseHTTPClient):
-    def __init__(self, ...):
-        super().__init__(url=..., api_prefix="/api/v1", env_prefix="PROMETHEUS")
-
-class AlertmanagerClient(BaseHTTPClient):
-    def __init__(self, ...):
-        super().__init__(url=..., api_prefix="/api/v2", env_prefix="ALERTMANAGER")
-```
-
-**Recommendation:** Extract BaseHTTPClient. The duplication is mechanical and any bug fix (e.g., response size limit) must otherwise be applied twice.
-
-**Singleton in `_mcp.py`:**
-
-```python
-_am_client: AlertmanagerClient | None = None
-_am_client_lock = threading.Lock()
-_am_client_attempted = False  # distinguish "not configured" from "not yet tried"
-
-def get_alertmanager_client() -> AlertmanagerClient | None:
-    """Return cached AlertmanagerClient, or None if ALERTMANAGER_URL is not set."""
-    global _am_client, _am_client_attempted
-    if not _am_client_attempted:
-        with _am_client_lock:
-            if not _am_client_attempted:
-                try:
-                    _am_client = AlertmanagerClient()
-                except ConfigError:
-                    _am_client = None  # not configured — this is fine
-                _am_client_attempted = True
-    return _am_client
-```
-
-**Tools (tools_alertmanager.py):**
-
-| Tool | Alertmanager API | Purpose |
-|------|-----------------|---------|
-| `alertmanager_list_silences` | `GET /api/v2/silences` | List active/expired silences |
-| `alertmanager_list_inhibitions` | `GET /api/v2/alerts` (filter) | Show inhibition rules and their status |
-
-**Alertmanager API endpoints used (all GET, read-only):**
-- `/api/v2/silences` — returns `[{id, status, matchers, createdBy, comment, startsAt, endsAt}]`
-- `/api/v2/alerts` — returns `[{labels, annotations, status, inhibitedBy, silencedBy}]`
-- `/api/v2/status` — returns `{cluster, config, uptime, versionInfo}`
-
-**New models in `models.py`:**
-
-```python
-class SilenceItem(TypedDict):
-    id: str
-    status: str
-    matchers: list[dict[str, str]]
-    created_by: str
-    comment: str
-    starts_at: str
-    ends_at: str
-
-class ListSilencesOutput(TypedDict):
-    total_count: int
-    active_count: int
-    expired_count: int
-    pending_count: int
-    silences: list[SilenceItem]
-
-class AlertmanagerAlertItem(TypedDict):
-    labels: dict[str, str]
-    annotations: dict[str, str]
-    status: str
-    inhibited_by: list[str]
-    silenced_by: list[str]
-
-class ListAlertmanagerAlertsOutput(TypedDict):
-    total_count: int
-    active_count: int
-    suppressed_count: int
-    alerts: list[AlertmanagerAlertItem]
-```
-
-**Error handling in `errors.py`:** Add Alertmanager-specific messages. The error patterns are the same (HTTP 401/403/404/5xx) but the actionable hints should reference `ALERTMANAGER_URL` instead of `PROMETHEUS_URL`.
-
-**Build order priority:** **FOURTH** — independent of caching/size limits but health check tool benefits from having this ready.
-
----
-
-### 5. Cardinality Statistics — NEW `tools_cardinality.py`
-
-**What changes:** New tool file with 1-2 cardinality tools using existing PrometheusClient.
-
-**Prometheus TSDB Stats API:**
-- `GET /api/v1/status/tsdb` — returns `{seriesCountByMetricName, labelValueCountByLabelName, memoryInBytesByLabelName, seriesCountByLabelValuePair, ...}`
-
-This endpoint exists in Prometheus since v2.14 and provides pre-computed cardinality statistics without needing to enumerate series.
-
-**Tools:**
-
-| Tool | API Endpoint | Purpose |
-|------|-------------|---------|
-| `prometheus_cardinality_stats` | `GET /api/v1/status/tsdb` | Top metrics by series count, top labels by value count |
-
-**Implementation approach:**
-
-```python
-# tools_cardinality.py — NEW FILE
-
-@mcp.tool(
-    name="prometheus_cardinality_stats",
-    annotations={"title": "Cardinality Stats", "readOnlyHint": True, ...},
-    structured_output=True,
-)
-def prometheus_cardinality_stats(
-    top_n: Annotated[int, Field(default=20, ge=1, le=100, ...)] = 20,
-) -> CardinalityStatsOutput:
-    """Get TSDB cardinality statistics from Prometheus.
-
-    Shows top metrics by series count, top labels by value count,
-    and top label-value pairs by series count. Essential for
-    investigating cardinality explosions and understanding which
-    metrics/labels consume the most TSDB resources.
-    """
-    client = get_client()
-    raw = client.get("/status/tsdb") or {}
-    data = raw.get("data") or {}
-
-    series_by_metric = data.get("seriesCountByMetricName") or []
-    label_value_counts = data.get("labelValueCountByLabelName") or []
-    series_by_label_pair = data.get("seriesCountByLabelValuePair") or []
-    total_series = data.get("headStats", {}).get("numSeries", 0)
-
-    # Shape and cap at top_n
     ...
 ```
 
-**New models:**
-
-```python
-class CardinalityItem(TypedDict):
-    name: str
-    value: int
-
-class CardinalityStatsOutput(TypedDict):
-    total_series: int
-    top_metrics_by_series: list[CardinalityItem]
-    top_labels_by_value_count: list[CardinalityItem]
-    top_label_pairs_by_series: list[CardinalityItem]
-```
-
-**No client changes needed** — uses existing `PrometheusClient.get()` with a different endpoint.
-
-**Build order priority:** **FIFTH** — uses existing client, independent of other features.
+**Why `dataclass(frozen=True)` not Pydantic:** Config is loaded once at startup and never mutated. Frozen dataclasses are simple, have no runtime overhead, and don't require Pydantic model schema generation. Pydantic is for tool I/O schemas; config is internal.
 
 ---
 
-### 6. Federation — NEW `tools_federation.py`, MODIFY `_mcp.py`
+### 2. `registry.py` — Instance Registry
 
-**What changes:** Multi-instance query support. Agent specifies which instance(s) to query, or queries all.
-
-**This is the most architecturally significant change.** Currently, the server assumes exactly one Prometheus instance. Federation requires managing multiple PrometheusClient instances.
-
-**Configuration approach:**
-
-```
-# Primary (existing, unchanged)
-PROMETHEUS_URL=https://prometheus-primary.example.com
-
-# Federation targets (new)
-PROMETHEUS_FEDERATION_URLS=https://prom-us.example.com,https://prom-eu.example.com
-PROMETHEUS_FEDERATION_NAMES=us-west,eu-central
-```
-
-Names are optional — if omitted, derive from hostname. Each federation target inherits the primary's auth config unless overridden.
-
-**Client management in `_mcp.py`:**
+**Purpose:** Manage the lifecycle of multiple `PrometheusClient` + `AlertmanagerClient` pairs, keyed by instance name.
 
 ```python
-_federation_clients: dict[str, PrometheusClient] | None = None
-_federation_lock = threading.Lock()
+# registry.py — key interface
+from dataclasses import dataclass
+from prometheus_mcp.cache import TTLCache
+from prometheus_mcp.client import PrometheusClient
+from prometheus_mcp.alertmanager_client import AlertmanagerClient
+from prometheus_mcp.config import FederationConfig, InstanceConfig
 
-def get_federation_clients() -> dict[str, PrometheusClient]:
-    """Return a dict of name → PrometheusClient for federation targets.
+@dataclass
+class InstanceEntry:
+    """One named instance with its client pair and cache."""
+    config: InstanceConfig
+    prometheus: PrometheusClient
+    alertmanager: AlertmanagerClient | None  # None if no AM URL configured
+    cache: TTLCache  # per-instance metric name cache
 
-    Returns empty dict if PROMETHEUS_FEDERATION_URLS is not set.
-    Clients share auth config with the primary instance.
+@dataclass(frozen=True)
+class InstanceInfo:
+    """Metadata returned by the discovery tool."""
+    name: str
+    prometheus_url: str
+    has_alertmanager: bool
+
+class InstanceRegistry:
+    """Thread-safe registry of named Prometheus/Alertmanager client pairs.
+    
+    Created once at startup. Not mutated after creation (entries are fixed).
+    Thread-safe because reads of dict[str, InstanceEntry] are safe once 
+    the dict is populated, and it's populated before any tool runs.
     """
-    global _federation_clients
-    if _federation_clients is None:
-        with _federation_lock:
-            if _federation_clients is None:
-                urls = os.environ.get("PROMETHEUS_FEDERATION_URLS", "")
-                if not urls:
-                    _federation_clients = {}
-                else:
-                    names = os.environ.get("PROMETHEUS_FEDERATION_NAMES", "")
-                    # Parse and create clients...
-                    _federation_clients = {...}
-    return _federation_clients
+
+    def __init__(self, config: FederationConfig | None = None) -> None:
+        self._instances: dict[str, InstanceEntry] = {}
+        self._default_name: str | None = None
+        self._federation_mode: bool = False
+        
+        if config is not None and config.instances:
+            self._federation_mode = True
+            for name, inst_config in config.instances.items():
+                prom = PrometheusClient(
+                    url=inst_config.prometheus_url,
+                    token=inst_config.prometheus_token,
+                    username=inst_config.prometheus_username,
+                    password=inst_config.prometheus_password,
+                    ssl_verify=inst_config.ssl_verify,
+                    timeout=inst_config.timeout,
+                    max_response_bytes=inst_config.max_response_bytes,
+                )
+                am = self._try_create_am(inst_config)
+                self._instances[name] = InstanceEntry(
+                    config=inst_config,
+                    prometheus=prom,
+                    alertmanager=am,
+                    cache=TTLCache(),
+                )
+            # First instance is the default
+            self._default_name = next(iter(config.instances))
+        else:
+            # Legacy mode: single instance from env vars
+            self._instances["default"] = InstanceEntry(
+                config=InstanceConfig(name="default", prometheus_url="(env)"),
+                prometheus=PrometheusClient(),  # reads env vars
+                alertmanager=self._try_create_am_from_env(),
+                cache=TTLCache(),
+            )
+            self._default_name = "default"
+
+    @property
+    def federation_mode(self) -> bool:
+        return self._federation_mode
+
+    def get_prometheus_client(self, name: str | None = None) -> PrometheusClient:
+        """Return client for named instance. None → default instance."""
+        target = name or self._default_name
+        entry = self._instances.get(target)
+        if entry is None:
+            raise ConfigError(
+                f"Instance {target!r} not found. "
+                f"Available: {', '.join(sorted(self._instances.keys()))}. "
+                "Use federation_list_instances to see configured instances."
+            )
+        return entry.prometheus
+
+    def get_alertmanager_client(self, name: str | None = None) -> AlertmanagerClient:
+        """Return AM client for named instance. Raises ConfigError if no AM."""
+        target = name or self._default_name
+        entry = self._instances.get(target)
+        if entry is None:
+            raise ConfigError(f"Instance {target!r} not found. ...")
+        if entry.alertmanager is None:
+            raise ConfigError(
+                f"Instance {target!r} has no Alertmanager configured. "
+                "Add alertmanager_url to the instance config."
+            )
+        return entry.alertmanager
+
+    def get_cache(self, name: str | None = None) -> TTLCache:
+        """Return per-instance cache. None → default instance's cache."""
+        target = name or self._default_name
+        return self._instances[target].cache
+
+    def list_instances(self) -> list[InstanceInfo]:
+        """Return metadata about all registered instances."""
+        return [
+            InstanceInfo(
+                name=name,
+                prometheus_url=entry.config.prometheus_url,
+                has_alertmanager=entry.alertmanager is not None,
+            )
+            for name, entry in self._instances.items()
+        ]
+
+    def all_prometheus_clients(self) -> list[tuple[str, PrometheusClient]]:
+        """Return (name, client) pairs for fan-out operations."""
+        return [(name, entry.prometheus) for name, entry in self._instances.items()]
+
+    def all_alertmanager_clients(self) -> list[tuple[str, AlertmanagerClient]]:
+        """Return (name, client) pairs for AM fan-out. Skips instances without AM."""
+        return [
+            (name, entry.alertmanager)
+            for name, entry in self._instances.items()
+            if entry.alertmanager is not None
+        ]
+
+    def close_all(self) -> None:
+        """Close every HTTP session (called from lifespan shutdown)."""
+        for entry in self._instances.values():
+            try:
+                entry.prometheus.close()
+            except Exception:
+                pass
+            if entry.alertmanager is not None:
+                try:
+                    entry.alertmanager.close()
+                except Exception:
+                    pass
 ```
 
-**Tools:**
+**Backward compatibility bridge:** When `PROMETHEUS_MCP_CONFIG` is not set, the registry creates a single `"default"` entry using env vars — exactly matching current `get_client()` behavior. `get_client(None)` in legacy mode returns the same `PrometheusClient` as today.
 
-| Tool | Purpose |
-|------|---------|
-| `prometheus_federated_query` | Run same PromQL against multiple instances, return per-instance results |
-| `prometheus_list_instances` | List configured instances (primary + federation) with health status |
+**Per-instance caching:** Each `InstanceEntry` holds its own `TTLCache`. Different Prometheus instances have different metric names. The tools that use caching (`prometheus_list_metrics`) get the per-instance cache via `registry.get_cache(instance)`.
+
+---
+
+### 3. `federation.py` — Fan-out and Merge
+
+**Purpose:** Execute the same query against multiple Prometheus/Alertmanager instances concurrently and merge results.
+
+**Concurrency model: `concurrent.futures.ThreadPoolExecutor`**
+
+Why this fits the existing synchronous model perfectly:
+- Tools are `def` (synchronous), running in FastMCP worker threads
+- `PrometheusClient` uses `requests` (synchronous, blocking)
+- `ThreadPoolExecutor` submits N blocking HTTP calls to N threads
+- The calling tool thread blocks on `as_completed()` / `executor.map()`
+- No asyncio involvement — thread-level parallelism within the worker thread
+- `ThreadPoolExecutor` is stdlib (`concurrent.futures`) — zero new dependencies
 
 ```python
-@mcp.tool(name="prometheus_federated_query", ...)
-def prometheus_federated_query(
-    query: str,
-    instances: list[str] | None = None,  # None = all
-    time: str | None = None,
-) -> FederatedQueryOutput:
-    """Execute a PromQL query across multiple Prometheus instances.
+# federation.py — key interface
+from __future__ import annotations
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from typing import Any
 
-    Runs the same query against each instance sequentially and returns
-    results grouped by instance name. Use prometheus_list_instances
-    to discover available instance names.
+from prometheus_mcp.registry import InstanceRegistry
+
+_DEFAULT_MAX_WORKERS = 8  # cap concurrent HTTP calls
+
+@dataclass
+class InstanceResult:
+    """Result from one instance in a fan-out operation."""
+    instance: str
+    data: Any | None  # parsed JSON response, None on error
+    error: str | None  # human-readable error string, None on success
+
+def fan_out_prometheus(
+    registry: InstanceRegistry,
+    call_fn: Callable[[PrometheusClient], Any],
+    *,
+    instance: str | None = None,
+    max_workers: int = _DEFAULT_MAX_WORKERS,
+) -> list[InstanceResult]:
+    """Query one or all Prometheus instances concurrently.
+
+    Args:
+        registry: Instance registry
+        call_fn: Function that takes a PrometheusClient and returns data.
+                 Example: lambda c: c.get("/query", params={"query": "up"})
+        instance: None for all instances, specific name for one
+        max_workers: ThreadPool size cap
+    
+    If instance is specified → call just that one (no fan-out, no ThreadPool).
+    If instance is None and federation mode → fan out to all.
+    If instance is None and legacy mode → call the single default.
+    
+    Returns list of InstanceResult. Partial failures captured, not raised.
     """
-    clients = get_federation_clients()
-    primary = get_client()
-
-    targets: dict[str, PrometheusClient] = {"primary": primary, **clients}
-    if instances:
-        targets = {k: v for k, v in targets.items() if k in instances}
-
-    results = {}
-    for name, client in targets.items():
+    if instance is not None and instance != "all":
+        # Single-instance targeted query — no thread pool needed
+        client = registry.get_prometheus_client(instance)
         try:
-            raw = client.get("/query", params={"query": query, "time": time})
-            results[name] = {"status": "success", "data": raw.get("data", {})}
+            data = call_fn(client)
+            return [InstanceResult(instance=instance, data=data, error=None)]
         except Exception as exc:
-            results[name] = {"status": "error", "error": str(exc)}
+            return [InstanceResult(instance=instance, data=None, error=str(exc))]
+    
+    clients = registry.all_prometheus_clients()
+    if len(clients) == 1:
+        # Legacy mode or single configured instance — no thread pool
+        name, client = clients[0]
+        try:
+            data = call_fn(client)
+            return [InstanceResult(instance=name, data=data, error=None)]
+        except Exception as exc:
+            return [InstanceResult(instance=name, data=None, error=str(exc))]
+    
+    # Multi-instance fan-out with ThreadPoolExecutor
+    results: list[InstanceResult] = []
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(clients))) as executor:
+        future_to_name = {
+            executor.submit(call_fn, client): name
+            for name, client in clients
+        }
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                data = future.result()
+                results.append(InstanceResult(instance=name, data=data, error=None))
+            except Exception as exc:
+                results.append(InstanceResult(instance=name, data=None, error=str(exc)))
+    
+    # Sort by instance name for deterministic output
+    results.sort(key=lambda r: r.instance)
+    return results
+```
 
+**Why `call_fn` callback pattern:** The fan-out function doesn't know which endpoint/params the tool needs. The tool passes a lambda: `fan_out_prometheus(registry, lambda c: c.get("/query", params=params))`. This keeps federation.py generic and reusable across all query types.
+
+**Instance label injection:** Fan-out results get `__prometheus_instance__` label injected into every metric/sample:
+
+```python
+def inject_instance_label(
+    result_data: dict[str, Any],
+    instance_name: str,
+) -> dict[str, Any]:
+    """Add __prometheus_instance__ to all metric labels in a Prometheus response.
+    
+    Works with instant query results, range query results, and alert data.
+    Modifies in place and returns the same dict.
+    """
+    data = result_data.get("data", {})
+    raw_results = data.get("result", [])
+    for item in raw_results:
+        metric = item.get("metric", {})
+        metric["__prometheus_instance__"] = instance_name
+    return result_data
+```
+
+**Merge strategies by query type:**
+
+| Query Type | Endpoint | Merge Strategy | Key Detail |
+|-----------|----------|---------------|------------|
+| **Instant query** | `/query` | Concatenate samples, inject `__prometheus_instance__` per sample | Different instances → different series. Union is correct. |
+| **Range query** | `/query_range` | Concatenate series, inject instance label, apply global points cap post-merge | Same as instant but with point budget enforcement. |
+| **List metrics** | `/label/__name__/values` | Set union across instances, sort, apply cap | Agent wants "what exists anywhere". De-duplicate. |
+| **Label values** | `/label/{name}/values` | Set union, sort | Same de-duplication logic. |
+| **Metadata** | `/metadata` | Merge dicts; same-metric-name entries concatenated from all instances | Metadata is definitional. Different instances may report different HELP. |
+| **Alerts** | `/alerts` | Concatenate, inject `__prometheus_instance__` | Different instances fire different alerts. |
+| **Targets** | `/targets` | Concatenate, inject `__prometheus_instance__` | Targets are per-instance by definition. |
+| **Rules** | `/rules` | Concatenate rule groups, prefix group name with `[instance_name]` | Same-named groups on different instances may have different rules. |
+| **Cardinality** | `/status/tsdb` | Return list of per-instance cardinality objects | TSDB stats are per-database; merging them is meaningless. |
+| **Health** | `/-/healthy` | Return list of per-instance health status | Health is per-instance. |
+| **Build/Runtime info** | `/status/buildinfo`, `/status/runtimeinfo` | Return per-instance objects | Version/runtime is per-instance. |
+| **AM silences** | AM `/silences` | Concatenate, inject `__alertmanager_instance__` | Silences are per-Alertmanager. |
+| **AM alerts** | AM `/alerts` | Concatenate, inject `__alertmanager_instance__` | Same pattern. |
+| **AM status** | AM `/status` | Per-instance status list | Same as health. |
+| **AM alert groups** | AM `/alerts/groups` | Concatenate, inject `__alertmanager_instance__` | Same pattern. |
+
+```python
+# Merge functions — concrete examples
+
+def merge_instant_results(
+    results: list[InstanceResult],
+) -> tuple[list[dict], str, list[str]]:
+    """Merge instant query results from multiple instances.
+    
+    Returns: (merged_raw_results, result_type, error_strings)
+    """
+    merged: list[dict] = []
+    errors: list[str] = []
+    result_type = "vector"
+    for r in results:
+        if r.error:
+            errors.append(f"{r.instance}: {r.error}")
+            continue
+        data = (r.data or {}).get("data", {})
+        result_type = data.get("resultType", result_type)
+        for item in data.get("result", []):
+            metric = item.get("metric", {})
+            metric["__prometheus_instance__"] = r.instance
+            merged.append(item)
+    return merged, result_type, errors
+
+
+def merge_set_values(
+    results: list[InstanceResult],
+    data_key: str = "data",
+) -> tuple[list[str], list[str]]:
+    """Merge list-of-strings results (metric names, label values) via set union.
+    
+    Returns: (sorted_unique_values, error_strings)
+    """
+    merged_set: set[str] = set()
+    errors: list[str] = []
+    for r in results:
+        if r.error:
+            errors.append(f"{r.instance}: {r.error}")
+            continue
+        values = (r.data or {}).get(data_key, [])
+        merged_set.update(values)
+    return sorted(merged_set), errors
+
+
+def merge_range_results(
+    results: list[InstanceResult],
+) -> tuple[list[dict], str, list[str]]:
+    """Merge range query results. Same as instant but preserves matrix type."""
+    merged: list[dict] = []
+    errors: list[str] = []
+    result_type = "matrix"
+    for r in results:
+        if r.error:
+            errors.append(f"{r.instance}: {r.error}")
+            continue
+        data = (r.data or {}).get("data", {})
+        result_type = data.get("resultType", result_type)
+        for item in data.get("result", []):
+            metric = item.get("metric", {})
+            metric["__prometheus_instance__"] = r.instance
+            merged.append(item)
+    return merged, result_type, errors
+```
+
+---
+
+### 4. `tools_federation.py` — Federation-Specific Tools
+
+**Purpose:** One new tool that only exists in federation mode — instance discovery.
+
+```python
+# tools_federation.py
+
+@mcp.tool(
+    name="federation_list_instances",
+    annotations={
+        "title": "List Instances",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def federation_list_instances() -> ListInstancesOutput:
+    """List all configured Prometheus/Alertmanager instances.
+
+    Returns instance names, URLs, and whether each has an Alertmanager.
+    Use this to discover available instances before targeting queries
+    with the 'instance' parameter.
+
+    In single-instance mode (no config file), returns one "default" instance.
+    """
+    registry = get_registry()
+    instances = registry.list_instances()
+    ...
     return output.ok(result, md)
 ```
 
-**Why sequential, not parallel:** Tools run in a single worker thread. Parallel HTTP within a sync tool would require `concurrent.futures.ThreadPoolExecutor` — added complexity for a feature that typically has 2-5 instances. Keep it simple initially; optimize if latency becomes a problem.
-
-**New models:**
-
-```python
-class FederatedInstanceResult(TypedDict):
-    instance: str
-    status: str  # "success" or "error"
-    error: str | None
-    result_type: str | None
-    result_count: int
-    data: list[InstantSample]
-
-class FederatedQueryOutput(TypedDict):
-    query: str
-    time: str | None
-    instance_count: int
-    success_count: int
-    error_count: int
-    results: list[FederatedInstanceResult]
-
-class InstanceInfo(TypedDict):
-    name: str
-    url: str
-    role: str  # "primary" or "federation"
-
-class ListInstancesOutput(TypedDict):
-    total_count: int
-    instances: list[InstanceInfo]
-```
-
-**Lifespan cleanup:** `app_lifespan` must close federation clients on shutdown.
-
-**Build order priority:** **SIXTH (LAST)** — most complex, depends on response size limits (to protect against large federated responses), builds on patterns established by Alertmanager client.
+**Only one new tool.** All other federation behavior is opt-in via the `instance` parameter on existing tools. This keeps the tool surface clean — agents that don't need federation see the same 16 tools plus one discovery tool.
 
 ---
 
-## Module Modification Summary
+## Modified Components
 
-| Module | Change | Scope |
-|--------|--------|-------|
-| `client.py` | Add response size guard + `max_response_bytes` | 15-25 lines added |
-| `_mcp.py` | Add `get_alertmanager_client()`, `get_federation_clients()`, `get_cache()`, update lifespan | ~50 lines added |
-| `models.py` | Add TypedDict schemas for 6 new tool outputs | ~80 lines added |
-| `errors.py` | Add `ResponseTooLargeError`, Alertmanager error hints | ~20 lines added |
-| `server.py` | Import 4 new tool modules | 4 lines added |
-| `tools.py` | Cache integration in `prometheus_list_metrics` | ~10 lines modified |
-| `output.py` | **UNCHANGED** | — |
-| `__init__.py` | **UNCHANGED** | — |
+### `_mcp.py` — The Central Wiring Change
 
-| New Module | Purpose | Estimated Size |
-|------------|---------|---------------|
-| `cache.py` | TTLCache class | ~50 lines |
-| `alertmanager_client.py` | AlertmanagerClient (or BaseHTTPClient + refactor) | ~80-120 lines |
-| `tools_health.py` | `prometheus_health_check` | ~60 lines |
-| `tools_alertmanager.py` | `alertmanager_list_silences`, `alertmanager_list_inhibitions` | ~150 lines |
-| `tools_cardinality.py` | `prometheus_cardinality_stats` | ~80 lines |
-| `tools_federation.py` | `prometheus_federated_query`, `prometheus_list_instances` | ~120 lines |
+This is the most critical modification. It replaces the singleton client pattern with a registry pattern.
 
-## Data Flow Changes
+**Before (current code, lines 18-73):**
+```python
+_client: PrometheusClient | None = None
+_client_lock = threading.Lock()
+_am_client: AlertmanagerClient | None = None
+_am_client_lock = threading.Lock()
 
-### Current Data Flow (v1.0)
-```
-Agent → MCP tool → get_client() → PrometheusClient.get() → Prometheus API → JSON → shape → output.ok()
+async def app_lifespan(_app):
+    yield {}
+    # close _client and _am_client
+
+def get_client() -> PrometheusClient:
+    # double-checked locking, lazy init from env vars
+    
+def get_alertmanager_client() -> AlertmanagerClient:
+    # double-checked locking, lazy init from env vars
 ```
 
-### v2.0 Data Flows
+**After:**
+```python
+_registry: InstanceRegistry | None = None
 
-**Standard tools (unchanged):**
-```
-Agent → existing tool → get_client() → PrometheusClient.get() [+ size guard] → shape → output.ok()
-```
+async def app_lifespan(_app):
+    global _registry
+    config_path = os.environ.get("PROMETHEUS_MCP_CONFIG", "")
+    if config_path:
+        config = load_config(config_path)
+        _registry = InstanceRegistry(config)
+        logger.info("prometheus_mcp: federation — %d instances", len(config.instances))
+    else:
+        _registry = InstanceRegistry(None)  # legacy single-instance
+        logger.debug("prometheus_mcp: single-instance mode")
+    try:
+        yield {}
+    finally:
+        if _registry is not None:
+            _registry.close_all()
+            _registry = None
 
-**Cached metric list:**
-```
-Agent → prometheus_list_metrics → get_cache().get("metrics")
-  HIT  → filter → output.ok()
-  MISS → get_client() → Prometheus API → cache.set() → filter → output.ok()
-```
+def get_registry() -> InstanceRegistry:
+    if _registry is None:
+        raise ConfigError("Registry not initialized — server not started")
+    return _registry
 
-**Alertmanager tools:**
-```
-Agent → alertmanager tool → get_alertmanager_client()
-  None → output.fail("ALERTMANAGER_URL not configured")
-  Some → AlertmanagerClient.get() → Alertmanager API v2 → shape → output.ok()
-```
+def get_client(instance: str | None = None) -> PrometheusClient:
+    return get_registry().get_prometheus_client(instance)
 
-**Federation tools:**
-```
-Agent → prometheus_federated_query → get_federation_clients() + get_client()
-  → for each instance: client.get("/query") → collect results
-  → merge → output.ok()
-```
-
-**Health check:**
-```
-Agent → prometheus_health_check
-  → client.session.get("/-/healthy") for Prometheus
-  → am_client.session.get("/-/healthy") for Alertmanager (if configured)
-  → merge → output.ok()
+def get_alertmanager_client(instance: str | None = None) -> AlertmanagerClient:
+    return get_registry().get_alertmanager_client(instance)
 ```
 
-## Patterns to Follow
+**What changes:**
+- `_client` / `_am_client` globals → replaced by single `_registry` global
+- `get_client()` and `get_alertmanager_client()` gain optional `instance` parameter
+- Lifespan loads config file and creates registry at startup (eager, not lazy)
+- Shutdown iterates all instances to close sessions
+- No more double-checked locking — registry is created once in lifespan before any tool runs
 
-### Pattern 1: Tool Module Isolation
-**What:** Each feature domain gets its own `tools_*.py` file.
-**When:** Any new tool that represents a distinct API surface or capability.
-**Why:** `tools.py` is already 1055 lines. Splitting by domain prevents the "everything in one file" anti-pattern while maintaining the same registration mechanism (import-time `@mcp.tool` decoration).
+**What stays the same:**
+- `get_client()` with no arguments returns the default instance's client — **identical behavior**
+- `get_alertmanager_client()` with no arguments returns the default AM client — **identical behavior**
+- `mcp = FastMCP("prometheus_mcp", lifespan=app_lifespan)` — same FastMCP instance
+- Thread-safety: registry is created in lifespan (async, single-threaded), read by tools (multiple threads) — reads are safe on a fully-constructed dict
+
+### Existing Tool Modifications — The `instance` Parameter
+
+Every existing tool gains an optional `instance` parameter. The pattern is identical across all 16 tools:
 
 ```python
-# server.py — just add imports
-from prometheus_mcp import tools as _tools              # noqa: F401 (existing)
-from prometheus_mcp import tools_health as _th           # noqa: F401
-from prometheus_mcp import tools_alertmanager as _ta      # noqa: F401
-from prometheus_mcp import tools_cardinality as _tc       # noqa: F401
-from prometheus_mcp import tools_federation as _tf        # noqa: F401
+# Example: prometheus_query in tools.py
+
+@mcp.tool(name="prometheus_query", ...)
+def prometheus_query(
+    query: Annotated[str, Field(...)],
+    time: Annotated[str | None, Field(...)] = None,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Target a specific Prometheus instance by name "
+                "(use federation_list_instances to discover names). "
+                "Leave empty to query the default instance. "
+                "Use 'all' to fan out across all instances and merge results."
+            ),
+        ),
+    ] = None,
+) -> QueryOutput:
+    try:
+        if instance == "all":
+            # Fan-out path
+            registry = get_registry()
+            params: dict[str, Any] = {"query": query}
+            if time is not None:
+                params["time"] = time
+            results = fan_out_prometheus(
+                registry,
+                lambda c: c.get("/query", params=params),
+            )
+            merged_raw, result_type, errors = merge_instant_results(results)
+            # Build samples from merged_raw (existing shaping logic)
+            samples = [_shape_instant_sample(item) for item in merged_raw]
+            result = QueryOutput(...)
+            # Build markdown with instance tags + error notes
+            ...
+            return output.ok(result, md)
+        else:
+            # Single-instance path: instance=None → default, instance="name" → specific
+            client = get_client(instance)
+            # ... existing logic unchanged ...
+    except Exception as exc:
+        output.fail(exc, ...)
 ```
 
-### Pattern 2: Graceful Optional Services
-**What:** Alertmanager and federation are optional. Tools for unconfigured services should fail with a clear message, not crash the server.
-**When:** Any service that may not be deployed.
+**Backward compatibility proof:**
+1. `instance` parameter defaults to `None` → callers that don't send it get identical behavior
+2. No output schema changes — `QueryOutput` TypedDict is identical
+3. When `instance=None` and no config file → `get_client(None)` → registry returns legacy singleton
+4. `instance` is always the last parameter with a default → positional callers unaffected
+5. `__prometheus_instance__` label lives inside existing `labels: dict[str, str]` — no schema change
+
+### `models.py` Additions
+
+New types for the federation discovery tool and federated per-instance responses:
 
 ```python
-def _require_alertmanager() -> AlertmanagerClient:
-    """Return AlertmanagerClient or raise ToolError with actionable message."""
-    client = get_alertmanager_client()
-    if client is None:
-        raise ToolError(
-            "Alertmanager is not configured. Set ALERTMANAGER_URL to use this tool. "
-            "Example: ALERTMANAGER_URL=https://alertmanager.example.com"
-        )
-    return client
+# models.py — additions (append, don't modify existing)
+
+class InstanceInfoItem(TypedDict):
+    name: str
+    prometheus_url: str
+    has_alertmanager: bool
+
+class ListInstancesOutput(TypedDict):
+    instance_count: int
+    federation_mode: bool
+    instances: list[InstanceInfoItem]
 ```
 
-### Pattern 3: Same Output Contract
-**What:** Every new tool follows the exact same output contract as existing tools.
-**When:** Always.
+**Existing TypedDicts are NOT modified.** The `__prometheus_instance__` label appears inside the already-existing `labels: dict[str, str]` field on `InstantSample`, `AlertItem`, `TargetItem`, etc. No schema change required.
+
+### `errors.py` Additions
 
 ```python
-# EVERY tool ends with:
-return output.ok(typed_dict_result, markdown_string)
+# errors.py — add to handle() function
 
-# EVERY tool error path:
-except Exception as exc:
-    output.fail(exc, "descriptive action string")
+if isinstance(exc, ConfigError) and "not found" in str(exc).lower():
+    return (
+        f"Error: {exc}. "
+        "Call federation_list_instances to see available instance names."
+    )
 ```
 
-### Pattern 4: Env-Var Configuration with Sensible Defaults
-**What:** All new config via environment variables, with defaults that make the simplest deployment work.
-**When:** Any new configurable behavior.
+### `cache.py` — No Changes Needed
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PROMETHEUS_MAX_RESPONSE_BYTES` | 52428800 (50MB) | Response size limit |
-| `PROMETHEUS_CACHE_TTL` | 300 (5 min) | Metric name cache TTL; 0 = disabled |
-| `ALERTMANAGER_URL` | (none) | Alertmanager base URL |
-| `ALERTMANAGER_TOKEN` | (none, falls back to PROMETHEUS_TOKEN) | Alertmanager Bearer token |
-| `ALERTMANAGER_USERNAME` | (none, falls back to PROMETHEUS_USERNAME) | Alertmanager Basic auth user |
-| `ALERTMANAGER_PASSWORD` | (none, falls back to PROMETHEUS_PASSWORD) | Alertmanager Basic auth pass |
-| `ALERTMANAGER_SSL_VERIFY` | (falls back to PROMETHEUS_SSL_VERIFY) | Alertmanager SSL verify |
-| `ALERTMANAGER_TIMEOUT` | (falls back to PROMETHEUS_TIMEOUT) | Alertmanager request timeout |
-| `PROMETHEUS_FEDERATION_URLS` | (none) | Comma-separated federation URLs |
-| `PROMETHEUS_FEDERATION_NAMES` | (none) | Comma-separated friendly names |
+The `TTLCache` class is already instantiable (not a singleton pattern on the class itself — only the `get_metrics_cache()` function is singleton). `InstanceEntry` in `registry.py` creates its own `TTLCache()` instance per registered instance.
 
-## Anti-Patterns to Avoid
+The existing `get_metrics_cache()` global function can remain for backward compatibility in test fixtures. The tools will migrate to using `registry.get_cache(instance)` instead.
 
-### Anti-Pattern 1: Modifying Existing Tool Signatures
-**What:** Changing parameters or output shape of the existing 8 tools.
-**Why bad:** Breaks backward compatibility. Existing agent prompts/workflows depend on current signatures.
-**Instead:** Add new tools with new names. The only acceptable modification to `tools.py` is adding cache logic inside `prometheus_list_metrics` (internal implementation change, same external API).
+---
 
-### Anti-Pattern 2: God Client
-**What:** Adding Alertmanager methods to PrometheusClient.
-**Why bad:** PrometheusClient targets Prometheus API v1. Alertmanager is API v2 with different JSON shapes, different error semantics, and different URL. Mixing them creates conditional logic everywhere.
-**Instead:** Separate AlertmanagerClient. Consider a BaseHTTPClient for shared plumbing.
+## Data Flow Diagrams
 
-### Anti-Pattern 3: Async/Await in Tools
-**What:** Making new tools `async def` because "they do HTTP".
-**Why bad:** Existing tools are all synchronous. FastMCP's `anyio.to_thread.run_sync` handles them correctly. Mixing sync and async tools in the same server creates cognitive overhead and potential bugs. The `requests` library is synchronous anyway.
-**Instead:** Keep all tools as `def`. Stay consistent.
+### Single-Instance Query (backward compatible, no change)
 
-### Anti-Pattern 4: In-Memory Cache Without TTL
-**What:** Caching metric names forever.
-**Why bad:** Prometheus instances add/remove metrics as services scale. Stale cache means missing metrics.
-**Instead:** Always TTL-based. 5 minutes default. Environment variable override. Clear-on-shutdown.
+```
+Agent: prometheus_query(query="up")
+  │  instance=None (default)
+  ▼
+tools.py: instance != "all" → single-instance path
+  │
+  ▼
+get_client(None) → registry.get_prometheus_client(None) → default entry
+  │
+  ▼
+PrometheusClient.get("/query", params={"query": "up"})
+  │
+  ▼ HTTP GET https://prometheus:9090/api/v1/query?query=up
+  │
+  ▼
+_shape_instant_sample() → QueryOutput → output.ok(result, md)
+```
 
-### Anti-Pattern 5: Parallel HTTP in Sync Tools Without Bounds
-**What:** Using ThreadPoolExecutor for federation queries without a max-worker limit.
-**Why bad:** If someone configures 50 federation targets, you'd spawn 50 threads.
-**Instead:** Sequential for now (simple, safe). If parallelism is needed later, cap at 5-10 workers.
+### Targeted Single-Instance Query (new capability)
+
+```
+Agent: prometheus_query(query="up", instance="eu-central")
+  │
+  ▼
+tools.py: instance="eu-central" → single-instance path
+  │
+  ▼
+get_client("eu-central") → registry.get_prometheus_client("eu-central")
+  │
+  ▼
+PrometheusClient[eu-central].get("/query", params={"query": "up"})
+  │
+  ▼ HTTP GET https://prom-eu.corp/api/v1/query?query=up
+  │
+  ▼
+_shape_instant_sample() → QueryOutput → output.ok(result, md)
+```
+
+### Fan-Out Query (new capability)
+
+```
+Agent: prometheus_query(query="up", instance="all")
+  │
+  ▼
+tools.py: instance="all" → fan-out path
+  │
+  ▼
+fan_out_prometheus(registry, lambda c: c.get("/query", params))
+  │
+  ├─→ ThreadPoolExecutor(max_workers=min(8, N))
+  │     ├─ Thread 1: client[us-west].get("/query") → JSON
+  │     ├─ Thread 2: client[eu-central].get("/query") → JSON
+  │     └─ Thread 3: client[ap-east].get("/query") → error (timeout)
+  │
+  ▼ as_completed() collects results
+  │
+merge_instant_results([ok, ok, err])
+  │
+  ├─ us-west: 3 samples → inject __prometheus_instance__="us-west"
+  ├─ eu-central: 2 samples → inject __prometheus_instance__="eu-central"
+  └─ ap-east: error "timed out" → captured in errors list
+  │
+  ▼
+5 merged samples + 1 error in markdown header
+  │
+  ▼
+QueryOutput(result_count=5, data=[...]) → output.ok(result, md)
+```
+
+---
+
+## Error Handling: Partial Failures
+
+Fan-out introduces a new error category: **partial failure** — some instances succeed, some fail. This does not exist in the current single-instance model.
+
+**Strategy:** Succeed with available data + report failures.
+
+| Scenario | Behavior |
+|----------|----------|
+| All instances succeed | Normal output, no error notes |
+| Some succeed, some fail | Return merged data + list failures in markdown and structured output |
+| All instances fail | Raise `ToolError` with all error messages concatenated |
+| Single-instance query fails | Existing behavior (raise ToolError via `output.fail()`) |
+
+```python
+# In the tool function after fan-out:
+merged, result_type, errors = merge_instant_results(fan_out_results)
+
+if not merged and errors:
+    # Total failure — all instances errored
+    output.fail(
+        ValueError(f"All instances failed: {'; '.join(errors)}"),
+        f"querying all instances for {query!r}",
+    )
+
+# Partial success — include error note in markdown
+md = f"## Query: `{query}` (across {success_count} of {total_count} instances)\n\n"
+if errors:
+    md += "### Instance Errors\n\n"
+    for e in errors:
+        md += f"- {e}\n"
+    md += "\n"
+```
+
+---
+
+## Module Structure Summary
+
+### New Files (4)
+
+| File | Purpose | Est. Lines | Dependencies |
+|------|---------|-----------|-------------|
+| `config.py` | JSON config parsing, validation, `InstanceConfig`/`FederationConfig` dataclasses | ~100 | stdlib only (`json`, `dataclasses`, `pathlib`) |
+| `registry.py` | `InstanceRegistry` managing N client pairs + per-instance caches | ~130 | `config.py`, `client.py`, `alertmanager_client.py`, `cache.py` |
+| `federation.py` | `fan_out_prometheus()`, `fan_out_alertmanager()`, merge functions | ~200 | `registry.py`, `concurrent.futures` (stdlib) |
+| `tools_federation.py` | `federation_list_instances` tool | ~60 | `_mcp.py`, `models.py`, `output.py` |
+
+### Modified Files (6)
+
+| File | What Changes | Scope |
+|------|-------------|-------|
+| `_mcp.py` | Replace singleton clients with `InstanceRegistry`; add `get_registry()`; modify lifespan | ~40 lines changed, ~20 added |
+| `tools.py` | Add `instance` param to 8 tools; add fan-out routing per tool | ~15 lines per tool × 8 tools = ~120 lines |
+| `tools_status.py` | Add `instance` param to 4 tools | ~15 lines per tool × 4 tools = ~60 lines |
+| `tools_alertmanager.py` | Add `instance` param to 4 tools | ~15 lines per tool × 4 tools = ~60 lines |
+| `models.py` | Add `InstanceInfoItem`, `ListInstancesOutput` | ~15 lines added |
+| `errors.py` | Add federation-specific error messages | ~15 lines added |
+
+### Unchanged Files (5)
+
+| File | Why Unchanged |
+|------|--------------|
+| `client.py` | Already fully parameterized. Federation creates multiple instances of it via constructor args. |
+| `alertmanager_client.py` | Same — already parameterized. |
+| `output.py` | `ok()` and `fail()` are generic. Work with any dict/exception. |
+| `cache.py` | `TTLCache` class is already instantiable. Registry creates per-instance instances. |
+| `server.py` | Just adds `import tools_federation` — 1 line, trivial. |
+
+---
 
 ## Build Order (Dependency-Driven)
 
 ```
-Phase 1: Response Size Limits
-  └── Modifies client.py (foundation for all HTTP)
-  └── No dependencies
+Phase 1: config.py ─────────────────────────────────────────────
+  Dependencies: none (stdlib only)
+  Unlocks: registry.py
+  Tests: unit tests for JSON parsing, defaults, validation
+  Checkpoint: config parsing works with sample JSON
 
-Phase 2: Metric Name Caching
-  └── New cache.py
-  └── Modifies tools.py (prometheus_list_metrics)
-  └── Depends on: nothing (but phase 1 means cached responses are also size-guarded)
+Phase 2: models.py additions ───────────────────────────────────
+  Dependencies: none
+  Unlocks: tools_federation.py, tool modifications
+  Tests: none (TypedDicts are type-only)
+  Checkpoint: types importable
 
-Phase 3: Health Check Tool
-  └── New tools_health.py
-  └── Depends on: nothing (but benefits from Alertmanager client in Phase 4)
-  └── Can ship with Prometheus-only health check first, add Alertmanager later
+Phase 3: registry.py ───────────────────────────────────────────
+  Dependencies: config.py, client.py, alertmanager_client.py, cache.py
+  Unlocks: _mcp.py modification, federation.py
+  Tests: unit tests for client creation, lookup, error on unknown instance
+  Checkpoint: registry creates clients from config + legacy mode works
 
-Phase 4: Alertmanager Integration
-  └── New alertmanager_client.py
-  └── New tools_alertmanager.py
-  └── Modifies _mcp.py (new singleton), errors.py (new handlers), models.py (new schemas)
-  └── Depends on: response size limits (Phase 1) for protection
-  └── Consider: BaseHTTPClient extraction as part of this phase
+Phase 4: _mcp.py modification ─────────────────────────────────
+  Dependencies: registry.py, config.py
+  Unlocks: tool modifications (get_client(instance) now works)
+  Tests: ALL EXISTING TESTS MUST PASS (backward compat checkpoint)
+  Checkpoint: `pytest` green with no config file (legacy mode)
+  CRITICAL: This is the backward-compatibility gate. If existing tests
+  fail here, stop and fix before proceeding.
 
-Phase 5: Cardinality Statistics
-  └── New tools_cardinality.py
-  └── Uses existing PrometheusClient
-  └── Depends on: response size limits (Phase 1) — TSDB stats can be large
+Phase 5: federation.py (fan-out + merge) ───────────────────────
+  Dependencies: registry.py
+  Unlocks: instance="all" support in tools
+  Tests: unit tests for fan_out, merge functions, partial failure handling
+  Checkpoint: fan-out works with mock clients
 
-Phase 6: Federation
-  └── New tools_federation.py
-  └── Modifies _mcp.py (federation client pool)
-  └── Depends on: response size limits (Phase 1), patterns from Alertmanager client (Phase 4)
-  └── Most complex — benefits from all prior phases being stable
+Phase 6: tools_federation.py ───────────────────────────────────
+  Dependencies: _mcp.py (get_registry), models.py additions
+  Independent of: tool modifications
+  Tests: test federation_list_instances tool
+  Checkpoint: new tool returns instance list
+
+Phase 7: Existing tool modifications (add instance param) ─────
+  Dependencies: _mcp.py modification, federation.py
+  Can be parallelized:
+    7a: tools.py (8 tools)
+    7b: tools_status.py (4 tools)
+    7c: tools_alertmanager.py (4 tools)
+  Tests: each tool tested with instance=None (backward compat),
+         instance="specific_name", instance="all"
+  Checkpoint: all 16 tools support federation
+
+Phase 8: server.py + integration tests ─────────────────────────
+  Dependencies: all above
+  Tests: end-to-end integration with config file
+  Checkpoint: full test suite green
 ```
 
-**Rationale for this order:**
-1. **Size limits first** — defense in depth for everything that follows
-2. **Caching second** — simple, self-contained, establishes the caching pattern
-3. **Health check third** — simple tool, useful immediately for k8s deployments
-4. **Alertmanager fourth** — introduces multi-service pattern, moderate complexity
-5. **Cardinality fifth** — simple tool using existing client, but can reveal large data
-6. **Federation last** — highest complexity, benefits from all patterns being established
+**Why this order:**
+
+1. **config.py first** — zero dependencies, everything else needs it
+2. **models.py early** — TypedDicts are additive, needed by tools but changing them breaks nothing
+3. **registry.py before _mcp.py** — the registry must exist before _mcp.py can reference it
+4. **_mcp.py is the critical hinge** — after this, `get_client()` routes through registry. **ALL EXISTING TESTS MUST PASS.** This is the backward-compatibility checkpoint. If anything breaks, the registry's legacy mode has a bug.
+5. **federation.py after registry** — fan-out needs registry for client lists
+6. **tools_federation.py is independent** — doesn't depend on tool modifications
+7. **Tool modifications last** — they consume everything above; can be parallelized across modules
+8. **Integration tests last** — verify the full system works end-to-end
+
+---
+
+## Patterns to Follow
+
+### Pattern 1: Instance Resolution (every tool)
+
+```python
+def prometheus_some_tool(
+    ...,  # existing params
+    instance: Annotated[str | None, Field(
+        default=None,
+        description="Target instance name, 'all' for fan-out, empty for default."
+    )] = None,
+) -> SomeOutput:
+    try:
+        if instance == "all":
+            registry = get_registry()
+            results = fan_out_prometheus(registry, lambda c: c.get("/...", params=...))
+            merged, errors = merge_some_results(results)
+            # Build output from merged + errors
+        else:
+            client = get_client(instance)
+            raw = client.get("/...", params=...)
+            # Existing logic unchanged
+    except Exception as exc:
+        output.fail(exc, "...")
+```
+
+### Pattern 2: Merge Function Signature
+
+```python
+def merge_X_results(results: list[InstanceResult]) -> tuple[MERGED_TYPE, list[str]]:
+    """Returns (merged_data, list_of_error_strings)."""
+```
+
+### Pattern 3: Backward-Compatible Parameter
+
+The `instance` parameter is always:
+- Last in the parameter list (after all existing params)
+- `Annotated[str | None, Field(default=None, ...)]`
+- With description: "empty = default, name = specific, 'all' = fan-out"
+
+### Pattern 4: Per-Instance Cache Access
+
+```python
+# Before (legacy):
+cache = get_metrics_cache()
+
+# After (federation-aware):
+registry = get_registry()
+cache = registry.get_cache(instance)
+```
+
+---
+
+## Anti-Patterns to Avoid
+
+### Anti-Pattern 1: Modifying PrometheusClient to Be "Instance-Aware"
+**What:** Adding instance routing logic inside `PrometheusClient` itself.
+**Why bad:** `PrometheusClient` is a clean HTTP wrapper. It should not know about federation, registries, or instance names.
+**Instead:** Keep `PrometheusClient` unchanged. Create multiple instances via constructor args.
+
+### Anti-Pattern 2: Global Config Object Read by Tools
+**What:** A module-level `_config` global that tools read directly.
+**Why bad:** Hidden coupling, hard to test. Config should flow through the registry.
+**Instead:** `load_config()` → `InstanceRegistry.__init__()` → registry owns the lifecycle.
+
+### Anti-Pattern 3: Async Fan-Out
+**What:** Using `asyncio.gather()` for concurrent queries.
+**Why bad:** Tools are `def` (synchronous). Introducing `async def` tools breaks the existing model. `requests` is synchronous. The tool's worker thread is already off the event loop. Adding async would require converting tools to `async def` and using `httpx` or `aiohttp`.
+**Instead:** `concurrent.futures.ThreadPoolExecutor` for fan-out within the synchronous tool. Threads within a thread — works perfectly, no model change.
+
+### Anti-Pattern 4: Changing Existing Output Schemas
+**What:** Adding new required fields to `QueryOutput`, `ListAlertsOutput`, etc.
+**Why bad:** Breaks MCP clients that validate structured output against the published schema.
+**Instead:** `__prometheus_instance__` label lives in the existing `labels: dict[str, str]` field. No schema change. Fan-out error reporting in markdown text.
+
+### Anti-Pattern 5: Lazy Config Loading
+**What:** Loading the JSON config on first tool call instead of at startup.
+**Why bad:** First tool invocation becomes unpredictably slow. Config errors surface mid-investigation, not at startup. Thread-safety becomes complex (who loads first? what if two threads race?).
+**Instead:** Load in lifespan (eager). Fail fast. Registry is ready before any tool runs.
+
+### Anti-Pattern 6: Separate "Federated" Versions of Every Tool
+**What:** Creating `prometheus_federated_query`, `prometheus_federated_query_range`, etc. as new tools alongside existing ones.
+**Why bad:** Doubles the tool surface (32 tools instead of 16+1). Agent must learn which tool to use. The tool descriptions diverge and become hard to maintain.
+**Instead:** Add `instance` parameter to existing tools. One tool, one purpose, optional federation. `instance="all"` triggers fan-out; otherwise, single-instance query.
+
+---
 
 ## Scalability Considerations
 
-| Concern | At 1 instance | At 5 instances (federation) | At 20 instances |
-|---------|---------------|---------------------------|-----------------|
-| Memory (client objects) | ~1KB per Session | ~5KB | ~20KB — negligible |
-| Metric cache size | ~500KB for 100K metrics | N/A (cache per primary) | Same |
-| Federation query latency | N/A | ~5x single query time (sequential) | Consider parallel with thread pool |
-| Response size risk | Low (single instance) | 5x — size limits essential | 20x — must enforce limits |
-| Connection count | 1 Session (pooled) | 5 Sessions | 20 Sessions (acceptable) |
+| Concern | 2-3 instances | 10 instances | 50+ instances |
+|---------|--------------|-------------|--------------|
+| Fan-out latency | Bounded by slowest (parallel). <1s typical. | Pool cap (8) batches. 2 rounds. | 7+ rounds. Make pool size configurable. |
+| Memory (merged) | Negligible — few KB | Existing caps (500 metrics, 5000 points) apply post-merge. Fine. | Per-instance pre-merge caps may be needed. |
+| HTTP sessions | 2-6 sessions | 10-20 sessions | 50-100 sessions. Consider lazy client creation. |
+| Config file | Trivial | ~1KB JSON | ~5KB JSON. Not a concern. |
+| ThreadPool overhead | Minimal | 8 threads × 2 rounds | 8 threads × 7 rounds. Consider increasing pool. |
+
+**Practical ceiling:** `_DEFAULT_MAX_WORKERS = 8` means at most 8 concurrent HTTP calls. Intentional — corporate Prometheus instances shouldn't be hit with 50 concurrent requests. For most deployments (2-5 instances), every instance is queried in a single parallel round.
+
+---
+
+## Test Strategy
+
+### Backward Compatibility Tests (Critical)
+
+After Phase 4 (_mcp.py modification), **all existing tests must pass unchanged** when `PROMETHEUS_MCP_CONFIG` is not set. This validates the registry's legacy mode.
+
+### New Test Files
+
+| Test File | Covers |
+|-----------|--------|
+| `test_config.py` | JSON parsing, defaults application, validation errors |
+| `test_registry.py` | Instance lookup, legacy mode, unknown instance errors, close_all |
+| `test_federation.py` | fan_out with mock clients, merge functions, partial failure |
+| `test_tools_federation.py` | `federation_list_instances` tool |
+
+### Test Fixtures (conftest.py changes)
+
+The existing `reset_client_cache` fixture resets `_mcp._client` and `_mcp._am_client`. It needs to reset `_mcp._registry` instead:
+
+```python
+def _do_reset() -> None:
+    """Reset the registry (closes all clients)."""
+    import prometheus_mcp._mcp as _mcp
+    if _mcp._registry is not None:
+        _mcp._registry.close_all()
+    _mcp._registry = None
+    get_metrics_cache().clear()
+```
+
+---
 
 ## Sources
 
-- Codebase analysis: direct reading of all 8 source modules (HIGH confidence)
-- Prometheus HTTP API v1: https://prometheus.io/docs/prometheus/latest/querying/api/ (HIGH)
-- Prometheus TSDB Status: https://prometheus.io/docs/prometheus/latest/querying/api/#tsdb-stats (HIGH)
-- Alertmanager API v2: https://prometheus.io/docs/alerting/latest/clients/ (HIGH)
-- FastMCP threading model: observed in `_mcp.py` comments and tool signatures (HIGH)
-- MCP protocol conventions: https://modelcontextprotocol.io (HIGH)
+- **Existing codebase** (HIGH confidence): Direct analysis of all 14 files in `src/prometheus_mcp/` + `tests/conftest.py` + `pyproject.toml`
+- **Python `concurrent.futures.ThreadPoolExecutor`** (HIGH confidence): stdlib since Python 3.2, well-documented
+- **FastMCP threading model** (HIGH confidence): Confirmed via `_mcp.py` lifespan pattern + tool function signatures (all `def`, not `async def`) + docstring in `client.py` lines 12-16
+- **Prometheus HTTP API v1** (HIGH confidence): All endpoints in existing tools verified against API docs
+- **Alertmanager API v2** (HIGH confidence): Endpoints in `tools_alertmanager.py` verified against API docs
+- **MCP protocol** (HIGH confidence): `CallToolResult` with `TextContent` + `structuredContent` pattern in `output.py`
+- **`PrometheusClient` parameterization** (HIGH confidence): Constructor at `client.py:97-106` accepts all config via keyword args with env-var fallbacks — no modifications needed for multi-instance

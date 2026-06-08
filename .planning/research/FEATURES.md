@@ -1,213 +1,367 @@
-# Feature Landscape
+# Feature Landscape: Federation (Multi-Instance Prometheus/Alertmanager)
 
-**Domain:** Prometheus/Alertmanager MCP server — v2.0 milestone
+**Domain:** MCP server federation — multi-instance Prometheus & Alertmanager query proxy
 **Researched:** 2026-06-08
-**Scope:** NEW features only — Alertmanager integration, cardinality stats, federation, health checks, metric caching, response size limits
+**Confidence:** HIGH (based on codebase analysis + Prometheus official docs + Thanos/Grafana ecosystem patterns)
 
 ## Table Stakes
 
-Features that users of a v2.0 Prometheus MCP server expect. Missing = milestone feels incomplete.
+Features users expect when a tool claims "multi-instance support." Missing = federation feels broken or unusable.
 
 | Feature | Why Expected | Complexity | Depends On | Notes |
-|---------|--------------|------------|------------|-------|
-| **Alertmanager silences list** (`alertmanager_list_silences`) | Incident responders need to know what's silenced — a silenced alert is invisible and "Is X silenced?" is the #1 question during handoffs | Medium | New `AlertmanagerClient` class | Alertmanager API v2 `GET /api/v2/silences` with optional `filter` param. Returns `gettableSilences` array with matchers, timestamps, status (active/pending/expired), createdBy, comment. Separate service URL from Prometheus — needs `ALERTMANAGER_URL` env var |
-| **Alertmanager alerts list** (`alertmanager_list_alerts`) | Complements existing `prometheus_list_alerts` — Alertmanager shows suppressed/inhibited state, routing, silence IDs that Prometheus doesn't expose | Medium | New `AlertmanagerClient` class | Alertmanager API v2 `GET /api/v2/alerts` with `active`, `silenced`, `inhibited`, `unprocessed`, `filter`, `receiver` query params. Response includes `status.state` (unprocessed/active/suppressed), `status.silencedBy[]`, `status.inhibitedBy[]` — critical for understanding WHY an alert is or isn't firing |
-| **TSDB cardinality statistics** (`prometheus_get_cardinality`) | Cardinality explosions are the #1 operational Prometheus problem. Agents investigating slow queries or OOM need this | Low | Existing `PrometheusClient` | Prometheus API `GET /api/v1/status/tsdb` with optional `limit` param. Returns `headStats` (numSeries, chunkCount, minTime, maxTime), `seriesCountByMetricName`, `labelValueCountByLabelName`, `memoryInBytesByLabelName`, `seriesCountByLabelValuePair`. Stable endpoint, straightforward GET |
-| **Health check tool** (`prometheus_health_check`) | K8s liveness/readiness probes need this; agents need to verify "is Prometheus actually up?" before investigating blank query results | Low | Existing `PrometheusClient` | Prometheus `GET /-/healthy` (always 200) and `GET /-/ready` (200 when ready). Note: these are on the management API, NOT under `/api/v1/` — the client.get() method appends `/api/v1` prefix, so this needs a separate raw request path or a new method |
-| **Response size limits** | Defense-in-depth against runaway queries returning 100MB+ JSON that crashes the MCP client or consumes all LLM context | Low | Existing `PrometheusClient` | Read response body in chunks, abort at configurable byte limit. `PROMETHEUS_MAX_RESPONSE_BYTES` env var with sensible default (e.g., 10MB). Apply at the HTTP layer in `client.py` before JSON parsing |
-| **Metric name caching** | Large Prometheus instances (500K+ metrics) make `prometheus_list_metrics` slow (2-5s). Repeated calls during investigation waste time on identical data | Medium | Existing `_mcp.py` globals | Cache the `GET /api/v1/label/__name__/values` response with a configurable TTL. `PROMETHEUS_CACHE_TTL` env var (default 300s). Thread-safe cache with lock. Invalidation on TTL expiry only — Prometheus metric names change slowly |
+|---------|-------------|------------|------------|-------|
+| **JSON config file for named instances** | Users must be able to declare multiple Prometheus/Alertmanager endpoints with names and per-instance auth | Low | Nothing (foundation) | Convention in ecosystem: named objects with `url`, `token`, `username`, `password`, `ssl_verify`. Grafana datasources, Thanos file-SD endpoints, and promtool all use named JSON/YAML config. File path via `PROMETHEUS_CONFIG_FILE` env var. JSON over YAML because stdlib `json` avoids new deps. |
+| **Backward-compatible single-instance mode** | Existing users (env-var config) must not break when upgrading to v3.0 | Low | Config file feature | If no config file is provided, fall back to existing env-var behavior exactly as today. Zero migration cost for existing users. This is an explicit project constraint. |
+| **Instance listing tool** | AI agents need to discover which instances are available before targeting queries | Low | Config loading | New tool `prometheus_list_instances` returning `[{name, url, type}]`. Agent calls this first in any multi-instance investigation. Analogous to Grafana's datasource list API or Thanos's `/stores` endpoint. |
+| **Targeted instance parameter on existing tools** | Agents must be able to query a specific cluster's Prometheus/Alertmanager | Med | Config loading, client registry | Add optional `instance: str | None` parameter to all 16 existing tools. `None` = use default instance (first configured, or env-var singleton). Must not break existing tool signatures — new param is optional with default `None`. |
+| **Per-instance authentication** | Different Prometheus instances typically have different auth credentials (separate teams, separate clusters, separate security domains) | Med | Config loading | Each instance config entry supports `token`, `username`/`password`, `ssl_verify` independently. Bearer > Basic > none priority per instance, same as current single-instance pattern. |
+| **Per-instance client caching** | Each named instance needs its own HTTP session, connection pool, and metric name cache | Med | Client registry, cache module | Registry pattern: `Dict[str, PrometheusClient]`, lazy-init, thread-safe. Each client has its own `requests.Session` and `TTLCache` keyed by instance name. Current singleton `_client` becomes the "default" entry. |
+| **Alertmanager multi-instance** | Organizations with multiple clusters typically have separate Alertmanager per cluster | Med | Config loading, AM client registry | Named Alertmanager instances in same config file. All 4 AM tools get `instance` parameter. Alertmanager HA clusters should be pointed at a single URL (not load-balanced, per official docs). |
+| **Config file validation with actionable errors** | Agents and operators need clear error messages when config is malformed | Low | Config loading | Pydantic model for config schema. Validation at startup with errors like "Instance 'prod' is missing required field 'url'" — same LLM-readable error style as existing `errors.py`. |
 
 ## Differentiators
 
-Features that set this MCP server apart from basic Prometheus tooling. Not expected at table stakes, but highly valued by power users.
+Features that set this MCP server apart from "just querying one Prometheus at a time." Not expected, but highly valued by SRE/DevOps teams managing multiple clusters.
 
 | Feature | Value Proposition | Complexity | Depends On | Notes |
-|---------|-------------------|------------|------------|-------|
-| **Alertmanager status** (`alertmanager_get_status`) | Shows cluster health, version, config — useful for "is Alertmanager itself healthy?" questions during incidents | Low | New `AlertmanagerClient` class | Alertmanager API v2 `GET /api/v2/status`. Returns cluster status (ready/settling/disabled), version info, uptime, config YAML. Simple read-only GET |
-| **Alertmanager alert groups** (`alertmanager_list_alert_groups`) | Shows how alerts are grouped for notification routing — answers "why did I get one notification instead of many?" or "what's grouped with this alert?" | Medium | New `AlertmanagerClient` class | Alertmanager API v2 `GET /api/v2/alerts/groups` with same filter params as alerts. Returns groups with labels, receiver, and nested alert arrays. Useful for understanding routing topology |
-| **Prometheus runtime info** (`prometheus_get_runtime_info`) | Exposes `timeSeriesCount`, `goroutineCount`, `storageRetention`, `startTime` — helpful for "why is Prometheus slow?" investigations | Low | Existing `PrometheusClient` | Prometheus API `GET /api/v1/status/runtimeinfo`. JSON fields may change between Prometheus versions — return raw data and let the agent interpret |
-| **Federated multi-instance query** | Query the same PromQL across multiple Prometheus instances and get unified results — essential for multi-cluster environments | High | Major architecture change | NOT a Prometheus federation endpoint call — this is MCP-level: configure N Prometheus URLs, create N clients, fan-out the same query to all, merge results with source labels. `PROMETHEUS_URLS` env var (comma-separated) or per-instance config. Each instance needs its own auth config |
-| **Build info** (`prometheus_get_build_info`) | Shows Prometheus version, Go version, revision — answers "what version of Prometheus is running?" | Low | Existing `PrometheusClient` | Prometheus API `GET /api/v1/status/buildinfo`. Trivial GET, stable since v2.14 |
+|---------|------------------|------------|------------|-------|
+| **Fan-out queries across all instances** | AI agent asks "what's the CPU across ALL clusters?" and gets unified results with instance labels injected | High | Client registry, result merging | Query all Prometheus instances in parallel (ThreadPoolExecutor), inject `__prometheus_instance__: "<name>"` label into each result's labels, merge into single response. This is the killer feature — mirrors what Thanos Query does with its StoreAPI fan-out but at the MCP tool level. |
+| **Subset fan-out (query specific instances)** | Agent queries a subset: `instances=["prod-us", "prod-eu"]` for regional comparison | Med | Fan-out infrastructure | `instances: list[str] | None` parameter on fan-out tools. `None` = all instances. Validates names against config. More targeted than "all" — avoids slow/irrelevant instances. |
+| **Partial response handling** | If 3/5 instances respond but 2 timeout, return results from the 3 that succeeded + warnings | Med | Fan-out infrastructure | Follow Thanos pattern: return available data with `warnings` field listing failed instances. Agent sees "got data from prod-us, prod-eu, prod-asia; failed: staging-1 (timeout), staging-2 (connection refused)". Never fail the entire query because one instance is down. |
+| **Per-instance health in listing** | `prometheus_list_instances` returns connectivity/health status for each instance | Med | Instance listing, health check | Parallel health probe (`/-/healthy`) for all configured instances. Shows which instances are reachable before agent starts querying. Prevents wasted round-trips to dead instances. |
+| **Per-instance timeout/limits override** | Different instances may need different timeouts (local = 5s, remote WAN = 60s) | Low | Config loading | Optional `timeout`, `max_response_bytes`, `cache_ttl` in per-instance config, falling back to global defaults. Small config enhancement, big operational value for mixed environments. |
+| **Instance name injection as external label** | When fan-out results are merged, the instance name is added as a synthetic label so agents can distinguish sources | Low | Fan-out infrastructure | Use synthetic label `__prometheus_instance__` (double-underscore convention from Prometheus relabeling). Must not collide with existing labels. Injected post-query into the result data, not into the PromQL expression itself. |
 
 ## Anti-Features
 
-Features to explicitly NOT build in v2.0.
+Features to explicitly NOT build. Each has been considered and rejected for specific reasons.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| **Alertmanager silence create/delete** | Violates read-only constraint. Creating/deleting silences is a write operation (`POST /api/v2/silences`, `DELETE /api/v2/silence/{id}`). Accidentally silencing alerts via an AI agent is a safety hazard | Keep read-only. List silences only. If an agent needs to create a silence, it should output the curl command for human execution |
-| **Alertmanager alert posting** | `POST /api/v2/alerts` creates alerts — write operation, violates read-only design. Agents should never autonomously create alerts | Keep read-only. List and inspect alerts only |
-| **Custom Alertmanager routing tree parser** | Parsing the YAML config to show routing trees is complex, fragile across AM versions, and better served by the `alertmanager_get_status` tool returning raw config | Return raw config YAML in `alertmanager_get_status`; let the AI agent parse it |
-| **Prometheus config reload** | `POST /-/reload` is a write/mutation operation on the management API | Out of scope forever per read-only constraint |
-| **Full federation scrape endpoint** | `GET /federate?match[]=...` returns exposition format (not JSON) — Prometheus-to-Prometheus, not useful for MCP agents. Parsing exposition format adds complexity for no MCP benefit | Use fan-out multi-instance PromQL queries instead. Each Prometheus instance already has the `/api/v1/query` endpoint |
-| **Prometheus TSDB snapshot/compaction** | `POST /api/v2/admin/tsdb/snapshot` and similar admin endpoints are write operations | Out of scope per read-only constraint |
-| **In-memory caching of query results** | Caching actual query results (not just metric names) is dangerous — Prometheus data is time-varying. A cached `rate()` from 60 seconds ago is stale and misleading | Cache ONLY metric name lists (slow-changing). Query results must always be fresh |
-| **Automatic federation discovery** | Auto-discovering Prometheus instances via DNS, Consul, or K8s is massive scope creep. Federation config should be explicit | Static URL list via env var. Discovery is the deployment tool's job |
-| **Write-back for response limits** | Truncating responses silently without telling the agent leads to wrong conclusions | Always include truncation metadata (count, total, truncated flag) in structured output — existing pattern already does this |
+|-------------|-----------|-------------------|
+| **Cross-instance PromQL evaluation** | PromQL is evaluated server-side by each Prometheus instance. We cannot merge raw time series from different instances and re-evaluate PromQL across them — that requires a full PromQL engine (Thanos/Cortex territory). | Fan-out the same PromQL expression to each instance independently, then merge the labeled results. Agent-side comparison via `__prometheus_instance__` label. |
+| **Automatic instance discovery (DNS/SD/Kubernetes)** | Service discovery adds operational complexity (DNS SRV, Kubernetes API, Consul, file_sd_configs). Config file is simpler and fits MCP's static-config philosophy (env vars + config files). | Named instances in JSON config file. Static, explicit, auditable. Users who need dynamic discovery can generate the JSON from their service discovery tooling. |
+| **Write operations (silence creation, rule management)** | Read-only constraint is a core architectural decision. Write operations across multiple instances add complexity and risk (partial writes, no rollback, safety hazard of AI agents creating silences). | Continue read-only pattern. Existing tools return info agents need; write operations should be done via Alertmanager UI or curl commands suggested by the agent. |
+| **YAML config file format** | Adding PyYAML as a dependency violates "minimal new deps" constraint. JSON is parsed by stdlib `json` module with zero new dependencies. | Use JSON config file. Provide a well-documented `.example` file. JSON works for structured config; Prometheus ecosystem tools use both JSON and YAML, but JSON is more common for MCP server configs (`server.json` already exists in this project). |
+| **Deduplication of HA replica results** | Thanos implements complex deduplication for HA Prometheus pairs using replica labels, penalty algorithms, and gap-filling. This is a deep rabbit hole of algorithmic complexity. | If users have Thanos, they should point the MCP server at Thanos Query (which deduplicates natively). For direct multi-Prometheus without Thanos, return all results with instance labels and let the agent reason about overlap. |
+| **Dynamic instance addition at runtime** | Hot-reloading config adds complexity for minimal benefit in an MCP stdio server (short-lived process, started per-session). | Restart the MCP server to pick up config changes. Config file is loaded once at startup during lifespan init. |
+| **Aggregation/reduction of fan-out results** | Aggregating (sum, avg) across instances in the MCP server would require PromQL-like computation logic. | Return raw results with instance labels. The AI agent can reason about cross-instance patterns from labeled results. If server-side aggregation is needed, suggest Thanos/Cortex. |
+| **Config file encryption/vault integration** | Encrypting tokens in the config file adds crypto dependencies and secret management complexity. | Document that config file should have restricted file permissions (0600). Tokens in config files follow the same security model as tokens in environment variables. |
+| **Full Prometheus federation endpoint (`/federate`)** | The `/federate` endpoint returns exposition format (not JSON) and is designed for Prometheus-to-Prometheus scraping, not for API clients. Parsing exposition format adds complexity for no MCP benefit. | Use standard `/api/v1/query` on each instance via fan-out. Each Prometheus instance's query API is the right interface for MCP tools. |
 
 ## Feature Dependencies
 
 ```
-alertmanager_list_silences ──┐
-alertmanager_list_alerts ────┤
-alertmanager_list_alert_groups ──┤── All require AlertmanagerClient (new class)
-alertmanager_get_status ─────┘    └── Requires ALERTMANAGER_URL env var
-                                       └── Requires error handling for AM-specific errors
-
-prometheus_get_cardinality ──── Uses existing PrometheusClient.get("/status/tsdb")
-                                └── New TypedDict models in models.py
-
-prometheus_health_check ─────── Needs new client method (not /api/v1 prefixed)
-                                └── GET /-/healthy and GET /-/ready are management endpoints
-
-prometheus_get_runtime_info ─── Uses existing PrometheusClient.get("/status/runtimeinfo")
-prometheus_get_build_info ───── Uses existing PrometheusClient.get("/status/buildinfo")
-
-response_size_limits ────────── Modifies PrometheusClient._request() in client.py
-                                └── Must apply BEFORE json() parsing (stream + size check)
-
-metric_name_cache ───────────── Modifies _mcp.py (new _metrics_cache global)
-                                └── Modifies prometheus_list_metrics() in tools.py
-                                └── Thread-safe TTL cache (threading.Lock + time.monotonic)
-
-federated_multi_instance ────── Requires multi-client architecture change
-                                ├── New env var parsing (PROMETHEUS_URLS)
-                                ├── Client registry/pool instead of singleton
-                                ├── Fan-out logic in tool layer
-                                └── Result merging with source labels
+                     JSON Config File Loading
+                    /           |              \
+                   v            v               v
+        Config Validation    Backward Compat    Per-Instance Auth
+        (Pydantic model)     (env-var fallback)  (per-client creds)
+                   \            |              /
+                    v           v             v
+                  Client Registry (Dict[name -> Client])
+                  (PrometheusClient + AlertmanagerClient)
+                    /           |              \
+                   v            v               v
+        Instance Listing   Targeted Queries   Per-Instance Cache
+              Tool         (instance param     (TTLCache per
+                            on 16 tools)       instance)
+                                |
+                                v
+                         Fan-Out Queries
+                        /       |        \
+                       v        v         v
+               Parallel     Instance    Partial
+               Execution    Label       Response
+               (ThreadPool) Injection   Handling
+                                |
+                                v
+                         Subset Fan-Out
+                         (instances param)
 ```
 
-## Feature Detail: Alertmanager Integration
+### Dependency Chain (build order):
 
-### AlertmanagerClient Design
-
-A new `AlertmanagerClient` class in a new `alertmanager_client.py` module, mirroring `PrometheusClient` patterns:
-- Env vars: `ALERTMANAGER_URL` (required for AM tools, optional globally), `ALERTMANAGER_TOKEN`, `ALERTMANAGER_USERNAME`, `ALERTMANAGER_PASSWORD`
-- Or: reuse Prometheus auth if `ALERTMANAGER_TOKEN` is not set (common in same-cluster deployments)
-- Base path: `{ALERTMANAGER_URL}/api/v2` (NOT v1 — v1 was removed in AM 0.27.0)
-- Same retry/timeout logic as PrometheusClient
-- Lazy singleton in `_mcp.py` — separate from Prometheus client
-- **Graceful absence**: If `ALERTMANAGER_URL` is not set, AM tools should return a clear error: "Alertmanager URL not configured — set ALERTMANAGER_URL env var"
-
-### Silences Tool (`alertmanager_list_silences`)
-
-- **Endpoint**: `GET /api/v2/silences`
-- **Params**: optional `filter` (matcher expressions like `alertname="MyAlert"`)
-- **Response shape**: Array of `gettableSilence` objects with `id`, `status.state` (expired/active/pending), `matchers[]`, `startsAt`, `endsAt`, `createdBy`, `comment`, `updatedAt`
-- **Structured output**: `SilenceItem` TypedDict with `id`, `state`, `matchers` (list of `{name, value, isRegex, isEqual}`), `starts_at`, `ends_at`, `created_by`, `comment`
-- **Markdown**: Show active silences first, with matcher details and creator/comment
-
-### Alerts Tool (`alertmanager_list_alerts`)
-
-- **Endpoint**: `GET /api/v2/alerts`
-- **Params**: `active` (bool), `silenced` (bool), `inhibited` (bool), `unprocessed` (bool), `filter` (matcher array), `receiver` (regex)
-- **Response shape**: Array of `gettableAlert` with `labels`, `annotations`, `status.state` (unprocessed/active/suppressed), `status.silencedBy[]`, `status.inhibitedBy[]`, `fingerprint`, `startsAt`, `endsAt`, `receivers[]`
-- **Key difference from `prometheus_list_alerts`**: Shows suppression status — which silence IDs are muting each alert, which inhibition rules apply
-
-## Feature Detail: Cardinality Statistics
-
-### TSDB Status Tool (`prometheus_get_cardinality`)
-
-- **Endpoint**: `GET /api/v1/status/tsdb`
-- **Params**: optional `limit` (default 10, max 10000) — limits items in each category
-- **Response sections**:
-  - `headStats`: numSeries, chunkCount, minTime, maxTime
-  - `seriesCountByMetricName`: top N metrics by series count (cardinality hotspots)
-  - `labelValueCountByLabelName`: top N labels by distinct value count
-  - `memoryInBytesByLabelName`: top N labels by memory usage
-  - `seriesCountByLabelValuePair`: top N label=value pairs by series count
-- **AI agent use case**: "Why is Prometheus using so much memory?" → check top metrics by series count. "Which label is causing cardinality explosion?" → check `labelValueCountByLabelName`
-
-## Feature Detail: Health Check
-
-### Health Check Tool (`prometheus_health_check`)
-
-- **Endpoints**: `GET /-/healthy` (liveness) and `GET /-/ready` (readiness)
-- **Important**: These are NOT under `/api/v1/` — they're management endpoints at the root path
-- **Implementation**: Need a new `PrometheusClient.check_health()` method that hits `{self.url}/-/healthy` and `{self.url}/-/ready` (bypassing `api_url`)
-- **Response**: Boolean `healthy` and `ready` flags, plus HTTP status codes
-- **Use case**: Agent checks health before running queries — avoids confusing "connection refused" errors. Also usable as K8s probe when the MCP server is deployed as a sidecar
-
-## Feature Detail: Metric Name Caching
-
-### Cache Strategy
-
-- **What to cache**: The response from `GET /api/v1/label/__name__/values` (metric name list)
-- **Why only this**: Metric names change slowly (new deploys, new exporters). Query results change every second — never cache those
-- **TTL**: Configurable via `PROMETHEUS_CACHE_TTL` env var, default 300 seconds (5 minutes)
-- **Invalidation**: TTL-only. No event-based invalidation (Prometheus has no change notification API)
-- **Thread safety**: Module-level `_metrics_cache` dict + `_cache_lock` (threading.Lock) + `_cache_timestamp` (float, `time.monotonic()`)
-- **Cache bypass**: New `force_refresh` param on `prometheus_list_metrics` tool (default False)
-- **Memory**: Metric name lists are typically 1-50K strings × ~30 bytes each = 30KB–1.5MB. Negligible
-- **Where**: In `_mcp.py` alongside the client cache, or in a new `_cache.py` module
-
-### Cache Implementation Pattern
-
-```
-If force_refresh or cache is None or (monotonic() - cache_timestamp) > ttl:
-    with _cache_lock:
-        # Double-checked: another thread may have refreshed while we waited
-        if force_refresh or cache is None or (monotonic() - cache_timestamp) > ttl:
-            cache = client.get("/label/__name__/values")
-            cache_timestamp = monotonic()
-return cache
-```
-
-## Feature Detail: Response Size Limits
-
-### Implementation Strategy
-
-- **Where**: In `PrometheusClient._request()` method, after getting the response but before `.json()`
-- **How**: Check `Content-Length` header first (fast path). If absent, read body in chunks with a byte counter
-- **Limit**: `PROMETHEUS_MAX_RESPONSE_BYTES` env var, default 10MB (10_485_760 bytes)
-- **On exceed**: Raise a descriptive error: "Response too large (>10MB). Narrow the query: use tighter label matchers, shorter time range, or larger step. Current limit: PROMETHEUS_MAX_RESPONSE_BYTES=10485760"
-- **Interaction with existing caps**: This is defense-in-depth below the existing `_METRICS_CAP` and `_RANGE_POINTS_CAP` which operate on parsed data. Response size limit operates on raw bytes before parsing — catches cases where Prometheus returns enormous JSON before the tool layer can cap items
-
-## Feature Detail: Federation (Multi-Instance)
-
-### Architecture Options
-
-**Option A (recommended): Fan-out at tool level**
-- Configure `PROMETHEUS_URLS=http://prom1:9090,http://prom2:9090,http://prom3:9090`
-- Each URL gets its own `PrometheusClient` instance (own auth, own timeout)
-- New tool variants: `prometheus_federated_query`, `prometheus_federated_query_range`
-- Fan-out: call all instances concurrently (threading), merge results, add `__prometheus_instance__` label
-- Original single-instance tools remain unchanged
-
-**Option B: Transparent fan-out on existing tools**
-- All existing tools automatically query all configured instances
-- Risky: changes behavior of existing tools, breaks backward compatibility
-
-**Recommendation**: Option A. Add new tools, don't modify existing ones. This matches the project's "add new tools, not modify existing" key decision.
-
-### Complexity Factors
-- Per-instance auth config (each Prometheus may have different tokens)
-- Per-instance error handling (one instance down shouldn't fail the whole query)
-- Result merging semantics (duplicate series from different instances)
-- Config syntax for multiple URLs with per-URL auth
-- Thread pool for concurrent fan-out
+1. **Config file loading + Pydantic validation** — foundation, everything depends on this
+2. **Client registry** — maps instance names to `PrometheusClient`/`AlertmanagerClient` objects with lazy init
+3. **Instance listing tool + targeted queries** — can be built in parallel once registry exists
+4. **Fan-out infrastructure** — requires client registry and parallel execution
+5. **Partial response + subset selection** — enhancements layered on top of fan-out
 
 ## MVP Recommendation
 
-**Prioritize (implement first):**
-1. **TSDB cardinality statistics** — Low complexity, high investigation value, uses existing client, single new tool
-2. **Health check tool** — Low complexity, high operational value, small client change
-3. **Response size limits** — Low complexity, defense-in-depth, modifies existing client only
-4. **Metric name caching** — Medium complexity, quality-of-life improvement, contained change
+### Phase 1: Foundation (must-have for any federation)
+1. **JSON config file loading** with Pydantic validation
+2. **Backward-compatible single-instance mode** — env-var fallback when no config file
+3. **Client registry** — `Dict[str, PrometheusClient]` with thread-safe lazy init
+4. **Per-instance authentication** — each client gets its own session/auth
 
-**Implement next:**
-5. **Alertmanager silences + alerts** — Medium complexity, requires new client class, new env vars, 2+ new tools
-6. **Alertmanager status** — Low complexity, free once AlertmanagerClient exists
+### Phase 2: Agent Discovery + Targeted Queries
+5. **`prometheus_list_instances` tool** — agent discovers what's available
+6. **Optional `instance` parameter on all 16 existing tools** — targeted queries to specific instances
+7. **Alertmanager multi-instance** (same registry pattern for `AlertmanagerClient`)
 
-**Defer or phase separately:**
-7. **Federated multi-instance** — High complexity, architecture change, new config model. Consider as a separate v2.1 milestone unless multi-cluster is a hard requirement
+### Phase 3: Fan-Out (killer differentiator)
+8. **Fan-out query tools** — parallel execution across instances with ThreadPoolExecutor
+9. **Instance label injection** (`__prometheus_instance__` on every sample)
+10. **Partial response handling** — return available data + warnings for failed instances
+11. **Subset fan-out** (`instances` parameter for targeting specific subsets)
+
+### Defer to post-v3.0:
+- Per-instance health probes in listing (adds latency to listing tool; agents can use `prometheus_health_check` with `instance` param instead)
+- Per-instance timeout/limits override (small config enhancement, not blocking)
+
+## Detailed Feature Specifications
+
+### Config File Format
+
+The config file is specified via `PROMETHEUS_CONFIG_FILE` env var. If not set, existing env-var behavior applies unchanged (backward compat).
+
+```json
+{
+  "instances": {
+    "prod-us": {
+      "type": "prometheus",
+      "url": "https://prometheus.us.example.com",
+      "token": "Bearer-token-here",
+      "ssl_verify": true,
+      "timeout": 30,
+      "max_response_bytes": 10485760,
+      "cache_ttl": 300
+    },
+    "prod-eu": {
+      "type": "prometheus",
+      "url": "https://prometheus.eu.example.com",
+      "username": "admin",
+      "password": "secret",
+      "ssl_verify": false
+    },
+    "alertmanager-global": {
+      "type": "alertmanager",
+      "url": "https://alertmanager.example.com",
+      "token": "am-token"
+    }
+  },
+  "defaults": {
+    "timeout": 30,
+    "max_response_bytes": 10485760,
+    "cache_ttl": 300,
+    "ssl_verify": true
+  }
+}
+```
+
+**Design rationale:**
+- `instances` is a **dict** (not array) so names are unique keys and lookups are O(1)
+- `type` field (`"prometheus"` or `"alertmanager"`) distinguishes instance kind
+- `defaults` section reduces repetition for shared settings across instances
+- Per-instance fields override `defaults`, which override hardcoded defaults
+- No YAML — stdlib `json` only, zero new dependencies
+- JSON matches existing `server.json` convention in this project
+- The first Prometheus-type instance is the "default" instance when `instance` param is omitted
+
+### Instance Listing Tool Output
+
+```python
+class InstanceInfo(TypedDict):
+    name: str           # "prod-us"
+    type: str           # "prometheus" | "alertmanager"
+    url: str            # base URL (no secrets exposed in output)
+
+class ListInstancesOutput(TypedDict):
+    total_count: int
+    prometheus_count: int
+    alertmanager_count: int
+    instances: list[InstanceInfo]
+```
+
+Agent workflow: call `prometheus_list_instances` → see "prod-us, prod-eu, staging" → call `prometheus_query(query="up", instance="prod-us")`.
+
+### Targeted Query Parameter
+
+All 16 existing tools gain one optional parameter:
+
+```python
+instance: Annotated[
+    str | None,
+    Field(
+        default=None,
+        max_length=100,
+        description=(
+            "Target a specific named Prometheus instance from the config file. "
+            "Use prometheus_list_instances to discover available instances. "
+            "Leave empty to use the default instance."
+        ),
+    ),
+] = None
+```
+
+When `instance` is provided:
+- Look up the named client from the registry
+- Execute the tool against that specific instance
+- Return results exactly as today (no label injection, no schema change)
+- Raise `ToolError` if instance name not found
+
+When `instance` is `None`:
+- Use the default instance (first Prometheus-type in config, or env-var singleton)
+- Single-instance behavior, backward compatible
+
+### Fan-Out Query Output Schema
+
+Fan-out is implemented as **new tools** (not modifications to existing), because fan-out changes the output schema. This follows the project's "add new tools, not modify existing" key decision.
+
+```python
+class FanOutQueryOutput(TypedDict):
+    query: str
+    time: str | None
+    instances_queried: list[str]     # ["prod-us", "prod-eu", "prod-asia"]
+    instances_failed: list[str]      # ["staging-1"]
+    warnings: list[str]              # ["staging-1: connection timeout after 30s"]
+    result_type: str
+    result_count: int
+    data: list[InstantSample]        # merged, each sample has __prometheus_instance__ label
+```
+
+New fan-out tools:
+- `prometheus_federated_query` — fan-out instant query across instances
+- `prometheus_federated_query_range` — fan-out range query across instances
+
+### Result Merging Strategy
+
+When fan-out queries return results from multiple instances:
+
+1. **Label injection:** Add `__prometheus_instance__: "<instance_name>"` to every sample's label set before merging
+2. **Concatenation:** Concatenate results from all successful instances (no dedup, no aggregation)
+3. **Ordering:** Results grouped by instance name, then by existing label order within each instance
+4. **Truncation:** Global caps still apply (500 metrics, 5000 range points) across the merged result set
+5. **Partial failure:** If some instances fail, return results from successful ones + `warnings` list describing failures. Never fail the entire query because one instance is down — this matches Thanos's partial-response design.
+
+### Parallel Execution Model
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def _fan_out_query(query: str, instances: list[str] | None = None) -> FanOutQueryOutput:
+    registry = get_client_registry()
+    targets = instances or registry.prometheus_names()
+    
+    results = []
+    failed = []
+    warnings = []
+    
+    with ThreadPoolExecutor(max_workers=min(len(targets), 10)) as pool:
+        futures = {
+            pool.submit(registry.get_prometheus(name).get, "/query", {"query": query}): name
+            for name in targets
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                data = future.result()
+                # Inject instance label into each sample
+                results.extend(_inject_instance_label(data, name))
+            except Exception as exc:
+                failed.append(name)
+                warnings.append(f"{name}: {errors.handle(exc, f'querying {name}')}")
+    
+    return {
+        "instances_queried": [n for n in targets if n not in failed],
+        "instances_failed": failed,
+        "warnings": warnings,
+        ...
+    }
+```
+
+Key design choices:
+- **ThreadPoolExecutor** (not asyncio) — matches existing synchronous tool model. FastMCP already runs sync tools in worker threads.
+- **`as_completed`** — return results as they arrive, don't wait for slowest instance
+- **Max 10 workers** — cap concurrent HTTP connections to avoid overwhelming the system
+- **Per-instance error isolation** — each instance failure is caught independently
+
+### Config Loading Architecture
+
+```python
+# In _mcp.py or new config.py module:
+
+class InstanceConfig(BaseModel):
+    type: Literal["prometheus", "alertmanager"]
+    url: str
+    token: str | None = None
+    username: str | None = None
+    password: str | None = None
+    ssl_verify: bool = True
+    timeout: float = 30.0
+    max_response_bytes: int = 10_485_760
+    cache_ttl: float = 300.0
+
+class FederationConfig(BaseModel):
+    instances: dict[str, InstanceConfig]
+    defaults: InstanceConfig | None = None
+
+class ClientRegistry:
+    """Thread-safe registry of named Prometheus/Alertmanager clients."""
+    
+    def __init__(self, config: FederationConfig):
+        self._config = config
+        self._prometheus_clients: dict[str, PrometheusClient] = {}
+        self._alertmanager_clients: dict[str, AlertmanagerClient] = {}
+        self._lock = threading.Lock()
+    
+    def get_prometheus(self, name: str) -> PrometheusClient:
+        """Lazy-init and return a PrometheusClient for the named instance."""
+        ...
+    
+    def get_alertmanager(self, name: str) -> AlertmanagerClient:
+        """Lazy-init and return an AlertmanagerClient for the named instance."""
+        ...
+    
+    def prometheus_names(self) -> list[str]:
+        """Return all configured Prometheus instance names."""
+        ...
+    
+    def alertmanager_names(self) -> list[str]:
+        """Return all configured Alertmanager instance names."""
+        ...
+    
+    def default_prometheus(self) -> PrometheusClient:
+        """Return the first Prometheus client (default for instance=None)."""
+        ...
+    
+    def close_all(self) -> None:
+        """Close all HTTP sessions (called from lifespan shutdown)."""
+        ...
+```
+
+### Backward Compatibility Strategy
+
+The `get_client()` function in `_mcp.py` must continue to work for single-instance mode:
+
+```python
+def get_client(instance: str | None = None) -> PrometheusClient:
+    """Return a PrometheusClient.
+    
+    If federation config exists: return named or default instance.
+    If no config file: return env-var singleton (existing behavior).
+    """
+    registry = _get_registry()  # may be None if no config file
+    if registry is not None:
+        if instance:
+            return registry.get_prometheus(instance)
+        return registry.default_prometheus()
+    # Legacy single-instance mode
+    return _get_singleton_client()
+```
+
+This means:
+- All existing tools that call `get_client()` continue to work unchanged
+- Tools that add `instance` parameter call `get_client(instance=instance)`
+- Zero breaking changes for users who don't use a config file
 
 ## Sources
 
-- Prometheus HTTP API: https://prometheus.io/docs/prometheus/latest/querying/api/ (HIGH confidence — official docs)
-- Prometheus TSDB status endpoint: `/api/v1/status/tsdb` section of above (HIGH confidence)
-- Prometheus Management API: https://prometheus.io/docs/prometheus/latest/management_api/ (HIGH confidence — `/-/healthy`, `/-/ready`)
-- Alertmanager API v2 OpenAPI spec: https://github.com/prometheus/alertmanager/blob/master/api/v2/openapi.yaml (HIGH confidence — canonical spec)
-- Alertmanager concepts (silences, inhibitions, grouping): https://prometheus.io/docs/alerting/latest/alertmanager/ (HIGH confidence)
-- Prometheus Federation: https://prometheus.io/docs/prometheus/latest/federation/ (HIGH confidence)
-- Existing codebase architecture: `.planning/codebase/ARCHITECTURE.md` (HIGH confidence — verified against source)
+- Prometheus Federation docs: https://prometheus.io/docs/prometheus/latest/federation/ (HIGH confidence — official docs, verified 2026-06-08)
+- Prometheus HTTP API v1: https://prometheus.io/docs/prometheus/latest/querying/api/ (HIGH confidence — official docs)
+- Alertmanager HA docs: https://prometheus.io/docs/alerting/latest/high_availability/ (HIGH confidence — official docs)
+- Thanos Querier design: https://thanos.io/tip/components/query.md/ (HIGH confidence — authoritative for fan-out/partial-response patterns)
+- Thanos file-SD config format: https://thanos.io/tip/components/query.md/#file-sd (HIGH confidence — shows JSON endpoint config with per-endpoint TLS)
+- Existing prometheus-mcp codebase: v0.2.0, 12 Python modules, 16 tools, ~2500 LoC (HIGH confidence — direct analysis)
+- Grafana multi-datasource provisioning: named datasource objects with per-datasource auth (MEDIUM confidence — training data, pattern verified against Thanos)
