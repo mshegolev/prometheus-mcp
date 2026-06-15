@@ -17,9 +17,15 @@
       },
       "environmentVariables": [
         {
+          "name": "PROMETHEUS_MCP_CONFIG",
+          "description": "Path to JSON config file for federation (multi-instance) mode. When set, single-instance env vars (PROMETHEUS_URL, etc.) are ignored. See README for schema.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
           "name": "PROMETHEUS_URL",
-          "description": "Prometheus server URL, e.g. https://prometheus.example.com (no trailing slash)",
-          "isRequired": true,
+          "description": "Prometheus server URL, e.g. https://prometheus.example.com (no trailing slash). Ignored when PROMETHEUS_MCP_CONFIG is set.",
+          "isRequired": false,
           "format": "string"
         },
         {

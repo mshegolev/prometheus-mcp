@@ -61,6 +61,11 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
+# Config files (may contain secrets)
+prometheus-mcp.json
+prometheus-mcp.*.json
+*.mcp-config.json
+
 # Dist
 *.tar.gz
 *.whl
