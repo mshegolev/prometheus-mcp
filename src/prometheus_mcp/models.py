@@ -15,6 +15,7 @@ https://errors.pydantic.dev/2.13/u/typed-dict-version). Optional fields use
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 if sys.version_info >= (3, 12):
     from typing import TypedDict
@@ -234,6 +235,61 @@ class BuildInfoOutput(TypedDict):
     buildUser: str
     buildDate: str
     goVersion: str
+
+
+# ── Root Cause Analysis ──────────────────────────────────────────────────────
+
+
+class AnomalyDetectionResult(TypedDict):
+    total_anomalies: int
+    metric_anomalies: list[dict]
+    detection_method: str
+    sensitivity: float
+    time_range: dict[str, str]
+
+
+class DependencyTraversalPath(TypedDict):
+    nodes: list[str]
+    edges: list[dict]
+    evidence_weight: float
+    impact_score: float
+
+
+class DependencyTraversalResult(TypedDict):
+    total_paths: int
+    paths: list[DependencyTraversalPath]
+    root_causes: list[dict]
+    traversal_depth: int
+
+
+class ChangePointEvent(TypedDict):
+    timestamp: str
+    event_type: str
+    description: str
+    correlation_strength: float
+    affected_services: list[str]
+
+
+class ChangePointDetectionResult(TypedDict):
+    total_events: int
+    events: list[ChangePointEvent]
+    time_window: dict[str, str]
+    correlation_threshold: float
+
+
+class RootCauseCandidate(TypedDict):
+    identifier: str
+    evidence_score: float
+    impact_assessment: dict[str, Any]
+    confidence_interval: dict[str, float]
+    ranking_explanation: str
+
+
+class RootCauseRankingResult(TypedDict):
+    candidates: list[RootCauseCandidate]
+    ranking_method: str
+    total_candidates: int
+    top_candidate: str | None
 
 
 # ── Alertmanager silences ────────────────────────────────────────────────────
