@@ -409,9 +409,136 @@ class AlertGroupResult(TypedDict):
     total_groups: int
     groups: dict[str, list[AMAlertItem]]
     ungrouped_count: int
+    rca_enhancement: dict[str, Any] | None
 
 
 class CascadeDetectionResult(TypedDict):
     total_cascades: int
     cascades: list[CascadeRelationship]
     root_causes: list[CorrelatedAlert]
+    rca_enhancement: dict[str, Any] | None
+
+
+# ── Dependency Mapping & Health ──────────────────────────────────────────────
+
+
+class ServiceNode(TypedDict):
+    """Represents a service in the dependency graph.
+
+    Attributes:
+        service_id: Unique identifier for the service
+        name: Display name of the service
+        namespace: Namespace/team that owns the service
+        cluster: Cluster/region where the service runs
+        instance: Specific instance name
+        health_status: Current health status (healthy, degraded, failed)
+        metadata: Additional service metadata
+        last_seen: Timestamp when service was last observed
+    """
+
+    service_id: str
+    name: str
+    namespace: str | None
+    cluster: str | None
+    instance: str | None
+    health_status: str
+    metadata: dict[str, Any]
+    last_seen: str
+
+
+class DependencyEdge(TypedDict):
+    """Represents a dependency relationship between services.
+
+    Attributes:
+        source: Source service identifier
+        target: Target service identifier
+        strength: Confidence/weight of the dependency relationship (0.0-1.0)
+        relationship_type: Type of dependency (direct, transitive, inferred)
+        latency_avg: Average latency of requests between services
+        error_rate: Error rate of requests between services
+        throughput: Requests per second between services
+        last_observed: Timestamp when dependency was last observed
+    """
+
+    source: str
+    target: str
+    strength: float
+    relationship_type: str
+    latency_avg: float | None
+    error_rate: float | None
+    throughput: float | None
+    last_observed: str
+
+
+class CrossClusterInfo(TypedDict):
+    """Information about cross-cluster service relationships.
+
+    Attributes:
+        cluster_id: Identifier for the cluster
+        region: Geographic region of the cluster
+        services: List of services in this cluster
+        connections: List of cross-cluster connections
+        health_status: Overall health of the cluster
+    """
+
+    cluster_id: str
+    region: str | None
+    services: list[str]
+    connections: list[dict[str, Any]]
+    health_status: str
+
+
+class DependencyGraph(TypedDict):
+    """Complete dependency graph representation.
+
+    Attributes:
+        nodes: List of service nodes in the graph
+        edges: List of dependency relationships
+        clusters: Cross-cluster information
+        timestamp: Timestamp when graph was generated
+        version: Version of the graph schema
+        metadata: Additional graph metadata
+    """
+
+    nodes: list[ServiceNode]
+    edges: list[DependencyEdge]
+    clusters: list[CrossClusterInfo]
+    timestamp: str
+    version: str
+    metadata: dict[str, Any]
+
+
+class CorrelationAnalysisResult(TypedDict):
+    """Result of traffic correlation analysis.
+
+    Attributes:
+        correlations: List of discovered correlations
+        confidence_scores: Confidence scores for each correlation
+        time_range: Time range of analysis
+        total_services: Total number of services analyzed
+        analysis_method: Method used for correlation analysis
+    """
+
+    correlations: list[dict[str, Any]]
+    confidence_scores: dict[str, float]
+    time_range: dict[str, str]
+    total_services: int
+    analysis_method: str
+
+
+class DependencyAnalysisResult(TypedDict):
+    """Complete dependency analysis result.
+
+    Attributes:
+        graph: Constructed dependency graph
+        correlation_data: Raw correlation analysis data
+        confidence_score: Overall confidence in the analysis
+        anomalies_detected: Any anomalies in dependency patterns
+        recommendations: Recommendations based on analysis
+    """
+
+    graph: DependencyGraph
+    correlation_data: CorrelationAnalysisResult
+    confidence_score: float
+    anomalies_detected: list[dict[str, Any]]
+    recommendations: list[dict[str, Any]]
