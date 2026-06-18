@@ -1,0 +1,666 @@
+openapi: 3.0.3
+info:
+  title: Prometheus MCP Server
+  description: |
+    MCP server for Prometheus and Alertmanager metrics and observability.
+    
+    This server gives AI agents (Claude, Cursor, CI pipelines) read-only access to Prometheus and Alertmanager 
+    for autonomous error investigation in corporate networks. Used by SRE, DevOps, QA, testing, analytics, 
+    architecture teams, and automated CI/CD pipelines to query metrics, inspect alerts, explore targets, 
+    investigate incidents, and monitor cardinality — all through the Model Context Protocol over stdio.
+    
+    All tools are read-only and carry `readOnlyHint: true` — zero risk of modifying Prometheus data.
+  version: 0.3.0
+  contact:
+    name: Mikhail Shchegolev
+    url: https://github.com/mshegolev/prometheus-mcp
+  license:
+    name: MIT
+    url: https://github.com/mshegolev/prometheus-mcp/blob/main/LICENSE
+
+servers:
+  - url: https://github.com/mshegolev/prometheus-mcp
+    description: Prometheus MCP Server GitHub Repository
+
+paths:
+  /tools/prometheus_list_metrics:
+    post:
+      summary: List metric names
+      description: |
+        List all metric names with optional substring filter. Start here when you don't know which metrics are available.
+        Output is capped at 500 metrics with a truncation hint.
+      operationId: prometheusListMetrics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pattern:
+                  type: string
+                  description: Optional case-insensitive substring filter
+              example:
+                pattern: "http"
+      responses:
+        '200':
+          description: Successful response with metric names
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMetricsOutput'
+
+  /tools/prometheus_query:
+    post:
+      summary: Execute instant PromQL query
+      description: |
+        Execute an instant PromQL expression and get current values. Returns result type (vector/scalar/matrix/string), 
+        sample count, and per-sample labels and values.
+      operationId: prometheusQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: PromQL expression, e.g. `up`, `rate(http_requests_total[5m])`
+                time:
+                  type: string
+                  description: RFC3339 or Unix timestamp; defaults to now
+              example:
+                query: "up"
+                time: "2023-01-01T00:00:00Z"
+      responses:
+        '200':
+          description: Successful response with query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryOutput'
+
+  /tools/prometheus_query_range:
+    post:
+      summary: Execute range PromQL query
+      description: |
+        Execute a PromQL expression over a time window. Returns one series per matching time series with timestamped values. 
+        Total data points across all series are capped at 5000.
+      operationId: prometheusQueryRange
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+                - start
+                - end
+                - step
+              properties:
+                query:
+                  type: string
+                  description: PromQL expression
+                start:
+                  type: string
+                  description: RFC3339 or Unix timestamp for start of range
+                end:
+                  type: string
+                  description: RFC3339 or Unix timestamp for end of range
+                step:
+                  type: string
+                  description: Resolution like `15s`, `1m`, `5m`
+              example:
+                query: "rate(http_requests_total[5m])"
+                start: "2023-01-01T00:00:00Z"
+                end: "2023-01-01T01:00:00Z"
+                step: "5m"
+      responses:
+        '200':
+          description: Successful response with range query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryRangeOutput'
+
+  /tools/prometheus_list_alerts:
+    post:
+      summary: List active and pending alerts
+      description: |
+        Returns all active/pending alerts with labels (including `alertname`, `severity`), state, activation time, 
+        and current value. Includes a state summary (firing vs pending counts).
+      operationId: prometheusListAlerts
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state:
+                  type: string
+                  enum: [active, pending, any]
+                  description: Filter alerts by state
+              example:
+                state: "active"
+      responses:
+        '200':
+          description: Successful response with alert information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAlertsOutput'
+
+  /tools/prometheus_list_targets:
+    post:
+      summary: List scrape targets
+      description: |
+        Returns scrape targets with job name, instance address, health (`up`/`down`/`unknown`), last scrape duration 
+        in milliseconds, and any error message. Includes a per-job summary.
+      operationId: prometheusListTargets
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state:
+                  type: string
+                  enum: [active, dropped, any]
+                  description: Filter targets by state
+              example:
+                state: "active"
+      responses:
+        '200':
+          description: Successful response with target information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTargetsOutput'
+
+  /tools/prometheus_get_metric_metadata:
+    post:
+      summary: Get metric metadata
+      description: |
+        Retrieve metric metadata (HELP text, TYPE, UNIT) for specified metrics or all metrics if none specified.
+      operationId: prometheusGetMetricMetadata
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metric:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional list of metric names to retrieve metadata for
+              example:
+                metric: ["http_requests_total", "up"]
+      responses:
+        '200':
+          description: Successful response with metric metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetMetricMetadataOutput'
+
+  /tools/prometheus_list_label_values:
+    post:
+      summary: List label values
+      description: |
+        List all values for a specific label. Useful for building queries and understanding data dimensions.
+      operationId: prometheusListLabelValues
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - label
+              properties:
+                label:
+                  type: string
+                  description: Label name to list values for
+                metric:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional list of metric names to filter by
+                match:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional list of series selectors to filter by
+              example:
+                label: "job"
+                metric: ["http_requests_total"]
+      responses:
+        '200':
+          description: Successful response with label values
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListLabelValuesOutput'
+
+  /tools/prometheus_list_rules:
+    post:
+      summary: List recording and alerting rules
+      description: |
+        Inspect recording rules and alerting rules with their expressions, labels, and annotations.
+      operationId: prometheusListRules
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [record, alert, any]
+                  description: Filter rules by type
+              example:
+                type: "alert"
+      responses:
+        '200':
+          description: Successful response with rule information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRulesOutput'
+
+components:
+  schemas:
+    ListMetricsOutput:
+      type: object
+      properties:
+        metrics:
+          type: array
+          items:
+            type: string
+          description: List of metric names
+        truncated:
+          type: boolean
+          description: Whether the result was truncated (more than 500 metrics)
+        total:
+          type: integer
+          description: Total number of metrics (before truncation)
+      required:
+        - metrics
+        - truncated
+        - total
+
+    QueryOutput:
+      type: object
+      properties:
+        resultType:
+          type: string
+          enum: [vector, scalar, matrix, string]
+          description: Type of the query result
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstantSample'
+          description: Query result samples
+        total:
+          type: integer
+          description: Total number of samples in the result
+      required:
+        - resultType
+        - result
+        - total
+
+    InstantSample:
+      type: object
+      properties:
+        metric:
+          type: object
+          additionalProperties:
+            type: string
+          description: Label-value pairs for the metric
+        value:
+          oneOf:
+            - type: number
+            - type: string
+          description: Sample value (number or string representation)
+        timestamp:
+          type: number
+          description: Unix timestamp in seconds (for vector results)
+      required:
+        - metric
+        - value
+
+    QueryRangeOutput:
+      type: object
+      properties:
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/RangeSeries'
+          description: Time series data
+        totalPoints:
+          type: integer
+          description: Total number of data points across all series
+        truncated:
+          type: boolean
+          description: Whether the result was truncated (more than 5000 points)
+      required:
+        - result
+        - totalPoints
+        - truncated
+
+    RangeSeries:
+      type: object
+      properties:
+        metric:
+          type: object
+          additionalProperties:
+            type: string
+          description: Label-value pairs for the metric
+        values:
+          type: array
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              oneOf:
+                - type: number
+                - type: string
+          description: Array of [timestamp, value] pairs
+      required:
+        - metric
+        - values
+
+    ListAlertsOutput:
+      type: object
+      properties:
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertItem'
+          description: List of alerts
+        summary:
+          $ref: '#/components/schemas/AlertStateSummary'
+          description: Summary of alert states
+        total:
+          type: integer
+          description: Total number of alerts
+      required:
+        - alerts
+        - summary
+        - total
+
+    AlertItem:
+      type: object
+      properties:
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: Alert labels including alertname and severity
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+          description: Alert annotations with human-readable information
+        state:
+          type: string
+          enum: [firing, pending]
+          description: Current alert state
+        activeAt:
+          type: string
+          format: date-time
+          description: When the alert became active
+        value:
+          type: string
+          description: Current value of the alert expression
+      required:
+        - labels
+        - annotations
+        - state
+        - activeAt
+        - value
+
+    AlertStateSummary:
+      type: object
+      properties:
+        firing:
+          type: integer
+          description: Number of firing alerts
+        pending:
+          type: integer
+          description: Number of pending alerts
+      required:
+        - firing
+        - pending
+
+    ListTargetsOutput:
+      type: object
+      properties:
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/TargetItem'
+          description: List of scrape targets
+        summary:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/TargetJobSummary'
+          description: Summary by job name
+        total:
+          type: integer
+          description: Total number of targets
+      required:
+        - targets
+        - summary
+        - total
+
+    TargetItem:
+      type: object
+      properties:
+        job:
+          type: string
+          description: Job name
+        instance:
+          type: string
+          description: Instance address
+        health:
+          type: string
+          enum: [up, down, unknown]
+          description: Target health status
+        scrapeUrl:
+          type: string
+          description: Full scrape URL
+        lastError:
+          type: string
+          description: Last error message (if any)
+        lastScrape:
+          type: string
+          format: date-time
+          description: Last scrape time
+        scrapeDurationMs:
+          type: number
+          description: Last scrape duration in milliseconds
+      required:
+        - job
+        - instance
+        - health
+        - scrapeUrl
+
+    TargetJobSummary:
+      type: object
+      properties:
+        up:
+          type: integer
+          description: Number of healthy targets
+        down:
+          type: integer
+          description: Number of unhealthy targets
+        unknown:
+          type: integer
+          description: Number of targets with unknown status
+        total:
+          type: integer
+          description: Total number of targets for this job
+      required:
+        - up
+        - down
+        - unknown
+        - total
+
+    GetMetricMetadataOutput:
+      type: object
+      properties:
+        metadata:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/MetadataEntry'
+          description: Map of metric names to their metadata entries
+        total:
+          type: integer
+          description: Total number of metadata entries
+      required:
+        - metadata
+        - total
+
+    MetadataEntry:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Metric type (counter, gauge, histogram, etc.)
+        help:
+          type: string
+          description: Human-readable help text
+        unit:
+          type: string
+          description: Metric unit (if any)
+      required:
+        - type
+        - help
+
+    ListLabelValuesOutput:
+      type: object
+      properties:
+        label:
+          type: string
+          description: Label name
+        values:
+          type: array
+          items:
+            type: string
+          description: List of label values
+        total:
+          type: integer
+          description: Total number of values
+      required:
+        - label
+        - values
+        - total
+
+    ListRulesOutput:
+      type: object
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleGroupItem'
+          description: List of rule groups
+        total:
+          type: integer
+          description: Total number of rule groups
+      required:
+        - groups
+        - total
+
+    RuleGroupItem:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Rule group name
+        file:
+          type: string
+          description: File containing the rule group
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleItem'
+          description: Rules in this group
+        interval:
+          type: integer
+          description: Evaluation interval in seconds
+      required:
+        - name
+        - file
+        - rules
+        - interval
+
+    RuleItem:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Rule name
+        type:
+          type: string
+          enum: [record, alert]
+          description: Rule type
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: Rule labels
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+          description: Rule annotations (for alert rules)
+        expr:
+          type: string
+          description: Rule expression
+        health:
+          type: string
+          description: Rule health status
+        lastError:
+          type: string
+          description: Last error (if any)
+        lastEvaluation:
+          type: string
+          format: date-time
+          description: Last evaluation time
+        evaluationTime:
+          type: number
+          description: Last evaluation duration in seconds
+      required:
+        - name
+        - type
+        - expr
+        - health
+
+tags:
+  - name: Metrics
+    description: Tools for querying and discovering Prometheus metrics
+  - name: Alerts
+    description: Tools for inspecting Prometheus alerts
+  - name: Targets
+    description: Tools for exploring Prometheus scrape targets
+  - name: Rules
+    description: Tools for inspecting Prometheus rules
+  - name: Metadata
+    description: Tools for retrieving metric metadata
+
+externalDocs:
+  description: Find out more about Prometheus MCP
+  url: https://github.com/mshegolev/prometheus-mcp

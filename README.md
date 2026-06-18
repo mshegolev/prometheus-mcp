@@ -161,6 +161,15 @@ ruff check src tests
 ruff format src tests
 ```
 
+## API Specification
+
+This project includes an OpenAPI 3.0 specification in the `specs/` directory that documents all MCP tools exposed by the server.
+
+To validate the specification:
+```bash
+python3 specs/validate_spec.py
+```
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
