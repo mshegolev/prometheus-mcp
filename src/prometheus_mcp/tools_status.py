@@ -39,7 +39,10 @@ _CARDINALITY_TOP_LIMIT = 20
     },
     structured_output=True,
 )
-def prometheus_health_check() -> HealthCheckOutput:
+def prometheus_health_check(
+    *,
+    instance: str | None = None,
+) -> HealthCheckOutput:
     """Check Prometheus liveness and readiness.
 
     Calls ``GET /-/healthy`` and ``GET /-/ready`` — management endpoints
@@ -62,7 +65,7 @@ def prometheus_health_check() -> HealthCheckOutput:
         ``ready`` (bool), ``ready_status_code``.
     """
     try:
-        client = get_client()
+        client = get_client(instance)
 
         # /-/healthy
         try:
@@ -114,7 +117,10 @@ def prometheus_health_check() -> HealthCheckOutput:
     },
     structured_output=True,
 )
-def prometheus_get_cardinality() -> CardinalityOutput:
+def prometheus_get_cardinality(
+    *,
+    instance: str | None = None,
+) -> CardinalityOutput:
     """Get TSDB statistics and cardinality data from Prometheus.
 
     Wraps ``GET /api/v1/status/tsdb``. Returns head stats (total series,
@@ -138,7 +144,7 @@ def prometheus_get_cardinality() -> CardinalityOutput:
         ``top_labels_by_memory_bytes``.
     """
     try:
-        client = get_client()
+        client = get_client(instance)
         raw = client.get("/status/tsdb") or {}
         data: dict[str, Any] = raw.get("data") or {}
         head: dict[str, Any] = data.get("headStats") or {}
@@ -198,7 +204,10 @@ def prometheus_get_cardinality() -> CardinalityOutput:
     },
     structured_output=True,
 )
-def prometheus_get_runtime_info() -> RuntimeInfoOutput:
+def prometheus_get_runtime_info(
+    *,
+    instance: str | None = None,
+) -> RuntimeInfoOutput:
     """Get Prometheus runtime information.
 
     Wraps ``GET /api/v1/status/runtimeinfo``. Returns operational data:
@@ -218,7 +227,7 @@ def prometheus_get_runtime_info() -> RuntimeInfoOutput:
         ``lastConfigTime``.
     """
     try:
-        client = get_client()
+        client = get_client(instance)
         raw = client.get("/status/runtimeinfo") or {}
         data: dict[str, Any] = raw.get("data") or {}
 
@@ -260,7 +269,10 @@ def prometheus_get_runtime_info() -> RuntimeInfoOutput:
     },
     structured_output=True,
 )
-def prometheus_get_build_info() -> BuildInfoOutput:
+def prometheus_get_build_info(
+    *,
+    instance: str | None = None,
+) -> BuildInfoOutput:
     """Get Prometheus build information.
 
     Wraps ``GET /api/v1/status/buildinfo``. Returns version, Go version,
@@ -277,7 +289,7 @@ def prometheus_get_build_info() -> BuildInfoOutput:
         ``buildDate`` / ``goVersion``.
     """
     try:
-        client = get_client()
+        client = get_client(instance)
         raw = client.get("/status/buildinfo") or {}
         data: dict[str, Any] = raw.get("data") or {}
 

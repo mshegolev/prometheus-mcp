@@ -14,6 +14,7 @@ from typing import Any
 
 from prometheus_mcp import output
 from prometheus_mcp._mcp import get_alertmanager_client, mcp
+from prometheus_mcp.federation import fan_out_prometheus
 from prometheus_mcp.models import (
     AMAlertGroupItem,
     AMAlertItem,
@@ -43,7 +44,11 @@ _MD_ITEM_LIMIT = 20
     },
     structured_output=True,
 )
-def alertmanager_list_silences() -> ListSilencesOutput:
+def alertmanager_list_silences(
+    *,
+    instance: str | None = None,
+    instances: list[str] | None = None,
+) -> ListSilencesOutput:
     """List all silences from Alertmanager.
 
     Wraps ``GET /api/v2/silences``. Returns silences with matchers, status
@@ -66,8 +71,80 @@ def alertmanager_list_silences() -> ListSilencesOutput:
         ``expired_count`` / ``silences`` (list with matchers, status, etc.).
     """
     try:
-        client = get_alertmanager_client()
-        raw: list[dict[str, Any]] = client.get("/silences") or []
+        from prometheus_mcp._mcp import _registry
+
+        # Handle fan-out cases
+        if instance == "all" or instances is not None:
+            # Get registry from global
+            registry = _registry
+            if registry is None:
+                return output.fail(Exception("Registry not available"), "listing Alertmanager silences")
+
+            # Get Alertmanager clients
+            if instance == "all":
+                clients = registry.all_alertmanager_clients()
+                # Get instance names for labeling
+                instance_names = registry.list_instances()
+                # Filter to only Alertmanager instances
+                am_instance_names = []
+                for name in instance_names:
+                    try:
+                        registry.get_alertmanager_client(name)
+                        am_instance_names.append(name)
+                    except:
+                        pass
+                client_names = am_instance_names
+            else:
+                # Subset targeting
+                clients = []
+                client_names = []
+                if instances:
+                    for inst_name in instances:
+                        try:
+                            client = registry.get_alertmanager_client(inst_name)
+                            clients.append(client)
+                            client_names.append(inst_name)
+                        except Exception as e:
+                            # Skip invalid instances for now - federation should handle this
+                            pass
+
+            if not clients:
+                return output.fail(Exception("No Alertmanager instances available"), "listing Alertmanager silences")
+
+            # Define query function for fan-out
+            def query_func(client):
+                return client.get("/silences") or []
+
+            # Execute fan-out
+            fan_out_result = fan_out_prometheus(query_func, clients, instance_names=client_names)
+
+            # For now, return results from first successful instance
+            # TODO: Implement proper merging of silences from multiple instances
+            successful_instances = fan_out_result["successful_instances"]
+            if successful_instances:
+                # Use results from first successful instance
+                raw_data = fan_out_result["data"]
+                if raw_data and len(raw_data) > 0:
+                    raw = raw_data[0] if isinstance(raw_data, list) else raw_data
+                else:
+                    raw = []
+            else:
+                # All instances failed
+                failed_instances = fan_out_result["failed_instances"]
+                if failed_instances:
+                    first_error = failed_instances[0]
+                    return output.fail(
+                        Exception(
+                            f"Alertmanager instance {first_error['instance_name']} failed: {first_error['message']}"
+                        ),
+                        "listing Alertmanager silences",
+                    )
+                else:
+                    raw = []
+        else:
+            # Single instance case
+            client = get_alertmanager_client(instance)
+            raw = client.get("/silences") or []
 
         silences: list[SilenceItem] = []
         active = 0
@@ -144,7 +221,10 @@ def alertmanager_list_silences() -> ListSilencesOutput:
     },
     structured_output=True,
 )
-def alertmanager_list_alerts() -> ListAMAlertsOutput:
+def alertmanager_list_alerts(
+    *,
+    instance: str | None = None,
+) -> ListAMAlertsOutput:
     """List alerts from Alertmanager with suppression state.
 
     Wraps ``GET /api/v2/alerts``. Returns alerts with their status
@@ -167,7 +247,7 @@ def alertmanager_list_alerts() -> ListAMAlertsOutput:
         ``unprocessed_count`` / ``alerts`` (list with status, silencedBy, etc.).
     """
     try:
-        client = get_alertmanager_client()
+        client = get_alertmanager_client(instance)
         raw: list[dict[str, Any]] = client.get("/alerts") or []
 
         alerts: list[AMAlertItem] = []
@@ -241,7 +321,10 @@ def alertmanager_list_alerts() -> ListAMAlertsOutput:
     },
     structured_output=True,
 )
-def alertmanager_get_status() -> AMStatusOutput:
+def alertmanager_get_status(
+    *,
+    instance: str | None = None,
+) -> AMStatusOutput:
     """Get Alertmanager cluster status, version, and config.
 
     Wraps ``GET /api/v2/status``. Returns cluster state (ready/settling),
@@ -260,7 +343,7 @@ def alertmanager_get_status() -> AMStatusOutput:
         ``config_yaml``.
     """
     try:
-        client = get_alertmanager_client()
+        client = get_alertmanager_client(instance)
         raw: dict[str, Any] = client.get("/status") or {}
 
         cluster = raw.get("cluster") or {}
@@ -310,7 +393,10 @@ def alertmanager_get_status() -> AMStatusOutput:
     },
     structured_output=True,
 )
-def alertmanager_list_alert_groups() -> ListAMAlertGroupsOutput:
+def alertmanager_list_alert_groups(
+    *,
+    instance: str | None = None,
+) -> ListAMAlertGroupsOutput:
     """List alert groups from Alertmanager showing routing topology.
 
     Wraps ``GET /api/v2/alerts/groups``. Returns groups with their labels,
@@ -329,7 +415,7 @@ def alertmanager_list_alert_groups() -> ListAMAlertGroupsOutput:
         (list with ``labels``, ``receiver``, ``alert_count``).
     """
     try:
-        client = get_alertmanager_client()
+        client = get_alertmanager_client(instance)
         raw: list[dict[str, Any]] = client.get("/alerts/groups") or []
 
         groups: list[AMAlertGroupItem] = []

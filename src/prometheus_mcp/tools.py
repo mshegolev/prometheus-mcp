@@ -131,6 +131,14 @@ def prometheus_list_metrics(
             ),
         ),
     ] = None,
+    *,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Target instance name (omit for default instance)",
+        ),
+    ] = None,
 ) -> ListMetricsOutput:
     """List all metric names known to Prometheus, with optional substring filter.
 
@@ -164,7 +172,7 @@ def prometheus_list_metrics(
         if cached is not None:
             raw: list[str] = cached
         else:
-            client = get_client()
+            client = get_client(instance)
             data = client.get("/label/__name__/values") or {}
             raw = data.get("data") or []
             cache.set(cache_key, raw)
@@ -237,6 +245,14 @@ def prometheus_query(
             ),
         ),
     ] = None,
+    *,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Target instance name (omit for default instance)",
+        ),
+    ] = None,
 ) -> QueryOutput:
     """Execute an instant PromQL query against Prometheus.
 
@@ -262,7 +278,7 @@ def prometheus_query(
         ``data`` (list of samples with ``labels``, ``timestamp``, ``value``).
     """
     try:
-        client = get_client()
+        client = get_client(instance)
         params: dict[str, Any] = {"query": query}
         if time is not None:
             params["time"] = time
@@ -357,6 +373,14 @@ def prometheus_query_range(
             ),
         ),
     ],
+    *,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Target instance name (omit for default instance)",
+        ),
+    ] = None,
 ) -> QueryRangeOutput:
     """Execute a PromQL range query returning time-series data points.
 
@@ -390,7 +414,7 @@ def prometheus_query_range(
         ``data`` (list of series with ``labels``, ``point_count``, ``values``).
     """
     try:
-        client = get_client()
+        client = get_client(instance)
         params: dict[str, Any] = {
             "query": query,
             "start": start,
@@ -469,7 +493,16 @@ def prometheus_query_range(
     },
     structured_output=True,
 )
-def prometheus_list_alerts() -> ListAlertsOutput:
+def prometheus_list_alerts(
+    *,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Target instance name (omit for default instance)",
+        ),
+    ] = None,
+) -> ListAlertsOutput:
     """List all active and pending alerts from Prometheus.
 
     Wraps ``GET /api/v1/alerts``. Returns every alert that Prometheus currently
@@ -495,7 +528,7 @@ def prometheus_list_alerts() -> ListAlertsOutput:
         ``state``, ``active_at``, ``value``).
     """
     try:
-        client = get_client()
+        client = get_client(instance)
         raw = client.get("/alerts") or {}
         alerts_data: list[dict[str, Any]] = (raw.get("data") or {}).get("alerts") or []
 
@@ -574,6 +607,14 @@ def prometheus_list_targets(
             ),
         ),
     ] = "active",
+    *,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Target instance name (omit for default instance)",
+        ),
+    ] = None,
 ) -> ListTargetsOutput:
     """List Prometheus scrape targets, summarised by job and health.
 
@@ -608,7 +649,7 @@ def prometheus_list_targets(
                 "'dropped' for targets dropped by relabelling, or 'any' for all."
             )
 
-        client = get_client()
+        client = get_client(instance)
         params: dict[str, Any] = {"state": state}
         raw = client.get("/targets", params=params) or {}
         targets_data = raw.get("data") or {}
@@ -734,6 +775,14 @@ def prometheus_get_metric_metadata(
             ),
         ),
     ] = None,
+    *,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Target instance name (omit for default instance)",
+        ),
+    ] = None,
 ) -> GetMetricMetadataOutput:
     """Get metric metadata (HELP text, TYPE, UNIT) from Prometheus.
 
@@ -763,7 +812,7 @@ def prometheus_get_metric_metadata(
         ``{type, help, unit}``).
     """
     try:
-        client = get_client()
+        client = get_client(instance)
         params: dict[str, Any] = {}
         if metric is not None:
             params["metric"] = metric
@@ -854,6 +903,14 @@ def prometheus_list_label_values(
             ),
         ),
     ] = None,
+    *,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Target instance name (omit for default instance)",
+        ),
+    ] = None,
 ) -> ListLabelValuesOutput:
     """List all values for a specific label from Prometheus.
 
@@ -883,7 +940,7 @@ def prometheus_list_label_values(
         ``returned_count`` / ``truncated`` / ``values`` (sorted list).
     """
     try:
-        client = get_client()
+        client = get_client(instance)
         params: dict[str, Any] = {}
         if match is not None:
             params["match[]"] = match
@@ -941,6 +998,14 @@ def prometheus_list_rules(
             ),
         ),
     ] = None,
+    *,
+    instance: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Target instance name (omit for default instance)",
+        ),
+    ] = None,
 ) -> ListRulesOutput:
     """List recording and alerting rules from Prometheus.
 
@@ -977,7 +1042,7 @@ def prometheus_list_rules(
                 "or leave empty for both."
             )
 
-        client = get_client()
+        client = get_client(instance)
         params: dict[str, Any] = {}
         if type is not None:
             params["type"] = type
