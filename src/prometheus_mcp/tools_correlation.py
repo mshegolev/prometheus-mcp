@@ -22,6 +22,20 @@ from prometheus_mcp.models import (
     CorrelationResult,
 )
 
+# RCA imports for enhanced correlation
+try:
+    from prometheus_mcp.rca import RCAEngine
+    from prometheus_mcp.models import (
+        AnomalyDetectionResult,
+        DependencyTraversalResult,
+        ChangePointDetectionResult,
+        RootCauseRankingResult,
+    )
+
+    RCA_AVAILABLE = True
+except ImportError:
+    RCA_AVAILABLE = False
+
 
 # ── Correlate Alerts Across Instances ────────────────────────────────────────
 
@@ -45,6 +59,9 @@ def correlate_alerts_across_instances(
     similarity_threshold: Annotated[
         float, Field(description="Minimum similarity score for correlation (default: 0.7)", ge=0.0, le=1.0, default=0.7)
     ] = 0.7,
+    enable_rca: Annotated[
+        bool, Field(description="Enable root cause analysis enhancement (default: False)", default=False)
+    ] = False,
     instance: str | None = None,
     instances: list[str] | None = None,
 ) -> CorrelationResult:
@@ -79,8 +96,40 @@ def correlate_alerts_across_instances(
             temporal_window=temporal_window, similarity_threshold=similarity_threshold
         )
 
+        # Optionally enhance with RCA analysis
+        rca_enhancement = None
+        if enable_rca and RCA_AVAILABLE:
+            try:
+                # Import RCA engine here to avoid import issues
+                from prometheus_mcp.rca import RCAEngine
+
+                # Initialize RCA engine
+                rca_engine = RCAEngine(registry)
+
+                # Convert correlation groups to alert groups for RCA
+                alert_groups = {}
+                for group in result.get("groups", []):
+                    service_id = group["service_identifier"]
+                    alerts = [corr_alert["alert"] for corr_alert in group["alerts"]]
+                    if service_id not in alert_groups:
+                        alert_groups[service_id] = []
+                    alert_groups[service_id].extend(alerts)
+
+                # Perform RCA analysis
+                rca_result = rca_engine.perform_full_analysis(alert_groups)
+                rca_enhancement = rca_result
+            except Exception as rca_error:
+                # Log RCA error but don't fail the entire operation
+                import logging
+
+                logging.warning(f"RCA enhancement failed: {rca_error}")
+
         # Generate markdown summary
-        markdown = _format_correlation_result(result)
+        markdown = _format_correlation_result(result, rca_enhancement)
+
+        # Add RCA data to structured output if available
+        if rca_enhancement:
+            result["rca_enhancement"] = rca_enhancement
 
         return output.ok(result, markdown)
 
@@ -88,7 +137,7 @@ def correlate_alerts_across_instances(
         return output.fail(e, "correlating alerts across instances")
 
 
-def _format_correlation_result(result: CorrelationResult) -> str:
+def _format_correlation_result(result: CorrelationResult, rca_enhancement: dict | None = None) -> str:
     """Format correlation result as markdown."""
     md = [
         "# Cross-Instance Alert Correlation",
@@ -155,6 +204,68 @@ def _format_correlation_result(result: CorrelationResult) -> str:
         if len(result["cascades"]) > 5:
             md.append(f"_... and {len(result['cascades']) - 5} more cascades_")
         md.append("")
+
+    # RCA Enhancement section
+    if rca_enhancement:
+        md.append("## Root Cause Analysis Insights")
+        md.append("")
+
+        # Anomalies detected
+        anomalies = rca_enhancement.get("anomalies", {})
+        if anomalies.get("total_anomalies", 0) > 0:
+            md.append("### Detected Metric Anomalies")
+            md.append(f"**Total Anomalies:** {anomalies['total_anomalies']}")
+            for anomaly in anomalies.get("metric_anomalies", [])[:3]:
+                metric_labels = anomaly.get("metric", {})
+                job = metric_labels.get("job", "unknown")
+                z_score = anomaly.get("z_score", 0)
+                md.append(f"- **{job}**: Anomaly (z-score: {z_score:.2f})")
+            if len(anomalies.get("metric_anomalies", [])) > 3:
+                md.append(f"  _... and {len(anomalies['metric_anomalies']) - 3} more_")
+            md.append("")
+
+        # Dependency paths
+        dependencies = rca_enhancement.get("dependencies", {})
+        if dependencies.get("total_paths", 0) > 0:
+            md.append("### Dependency Paths")
+            md.append(f"**Total Paths Analyzed:** {dependencies['total_paths']}")
+            for path in dependencies.get("paths", [])[:3]:
+                nodes = path.get("nodes", [])
+                if nodes:
+                    path_str = " → ".join(nodes[:3])  # Limit path display
+                    weight = path.get("evidence_weight", 0)
+                    md.append(f"- **{path_str}** (evidence: {weight:.2f})")
+            if len(dependencies.get("paths", [])) > 3:
+                md.append(f"  _... and {len(dependencies['paths']) - 3} more_")
+            md.append("")
+
+        # Change points
+        changes = rca_enhancement.get("changes", {})
+        if changes.get("total_events", 0) > 0:
+            md.append("### Recent Changes")
+            md.append(f"**Total Change Events:** {changes['total_events']}")
+            for event in changes.get("events", [])[:3]:
+                event_type = event.get("event_type", "unknown")
+                description = event.get("description", "")
+                strength = event.get("correlation_strength", 0)
+                md.append(f"- **{event_type}**: {description} (strength: {strength:.2f})")
+            if len(changes.get("events", [])) > 3:
+                md.append(f"  _... and {len(changes['events']) - 3} more_")
+            md.append("")
+
+        # Ranked candidates
+        ranking = rca_enhancement.get("ranking", {})
+        if ranking.get("total_candidates", 0) > 0:
+            md.append("### Root Cause Candidates")
+            md.append(f"**Total Candidates:** {ranking['total_candidates']}")
+            for candidate in ranking.get("candidates", [])[:5]:
+                identifier = candidate.get("identifier", "unknown")
+                score = candidate.get("evidence_score", 0)
+                explanation = candidate.get("ranking_explanation", "")
+                md.append(f"- **{identifier}**: {score:.2f} - {explanation}")
+            if len(ranking.get("candidates", [])) > 5:
+                md.append(f"  _... and {len(ranking['candidates']) - 5} more_")
+            md.append("")
 
     return "\n".join(md)
 

@@ -402,6 +402,7 @@ class CorrelationResult(TypedDict):
     groups: list[CorrelationGroup]
     cascades: list[CascadeRelationship]
     instance_attribution: dict[str, int]
+    rca_enhancement: dict[str, Any] | None
 
 
 class AlertGroupResult(TypedDict):
