@@ -636,3 +636,27 @@ class HealthProbeResult(TypedDict):
     error_message: str | None
     metrics: dict[str, Any]
     resilience_score: float
+
+
+class LoadSheddingRecommendation(TypedDict):
+    """Recommendation for load shedding based on dependency fragility.
+
+    Attributes:
+        service: Service identifier for the recommendation
+        priority: Priority level (high, medium, low)
+        action: Recommended action (reduce_load, monitor_closely, protect_path)
+        reason: Reason for the recommendation
+        confidence: Confidence score in the recommendation (0.0-1.0)
+        alternatives: Alternative approaches to consider
+        estimated_impact: Estimated impact of following the recommendation
+        implementation_guide: Guide for implementing the recommendation
+    """
+
+    service: str
+    priority: str
+    action: str
+    reason: str
+    confidence: float
+    alternatives: list[dict[str, Any]]
+    estimated_impact: dict[str, Any] | None
+    implementation_guide: list[str] | None
