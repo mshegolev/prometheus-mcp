@@ -34,7 +34,6 @@
 **UI hint:** no
 
 ---
-
 ## Phase 9: Root Cause Analysis Tools
 
 **Goal:** Implement tools for anomaly detection in metrics, dependency chain traversal, and change point detection to help AI agents identify underlying causes of alert cascades.
@@ -51,6 +50,13 @@
 **Dependencies:** Phase 8 (correlation.py), Phase 4 (federation.py)
 
 **UI hint:** no
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Implement root cause analysis engine with anomaly detection and dependency traversal
+- [ ] 09-02-PLAN.md — Implement change point detection and candidate ranking system
+- [ ] 09-03-PLAN.md — Create comprehensive tests for root cause analysis components
 
 ---
 
