@@ -458,6 +458,7 @@ class DependencyEdge(TypedDict):
         error_rate: Error rate of requests between services
         throughput: Requests per second between services
         last_observed: Timestamp when dependency was last observed
+        metadata: Additional edge metadata
     """
 
     source: str
@@ -468,6 +469,7 @@ class DependencyEdge(TypedDict):
     error_rate: float | None
     throughput: float | None
     last_observed: str
+    metadata: dict[str, Any]
 
 
 class CrossClusterInfo(TypedDict):
@@ -542,3 +544,95 @@ class DependencyAnalysisResult(TypedDict):
     confidence_score: float
     anomalies_detected: list[dict[str, Any]]
     recommendations: list[dict[str, Any]]
+
+
+class ClusterInfo(TypedDict):
+    """Information about a cluster for visualization.
+
+    Attributes:
+        cluster_id: Unique identifier for the cluster
+        name: Display name of the cluster
+        region: Geographic region of the cluster
+        status: Current status of the cluster (healthy, degraded, failed)
+        services: Number of services in the cluster
+        dependencies: Number of cross-cluster dependencies
+        metadata: Additional cluster metadata
+    """
+
+    cluster_id: str
+    name: str
+    region: str | None
+    status: str
+    services: int
+    dependencies: int
+    metadata: dict[str, Any]
+
+
+class VisualizationResult(TypedDict):
+    """Result of cross-cluster dependency visualization.
+
+    Attributes:
+        graph: Dependency graph with visualization metadata
+        clusters: Cluster information for visualization
+        layout_coordinates: Coordinates for graph layout
+        color_mapping: Color scheme for different cluster/service types
+        legend: Legend information for the visualization
+    """
+
+    graph: DependencyGraph
+    clusters: list[ClusterInfo]
+    layout_coordinates: dict[str, dict[str, float]]
+    color_mapping: dict[str, str]
+    legend: dict[str, str]
+
+
+class SyntheticProbe(TypedDict):
+    """Configuration for a synthetic health probe.
+
+    Attributes:
+        probe_id: Unique identifier for the probe
+        target_service: Target service to probe
+        target_endpoint: Specific endpoint to probe
+        frequency_seconds: How often to run the probe
+        timeout_seconds: Timeout for probe requests
+        payload: Optional payload to send with the probe
+        headers: Optional headers to include with the probe
+        expected_response: Expected response pattern
+        metadata: Additional probe metadata
+    """
+
+    probe_id: str
+    target_service: str
+    target_endpoint: str
+    frequency_seconds: int
+    timeout_seconds: int
+    payload: str | None
+    headers: dict[str, str] | None
+    expected_response: str | None
+    metadata: dict[str, Any]
+
+
+class HealthProbeResult(TypedDict):
+    """Result of a synthetic health probe execution.
+
+    Attributes:
+        probe_id: Identifier of the probe that was executed
+        target_service: Service that was probed
+        timestamp: When the probe was executed
+        success: Whether the probe succeeded
+        response_time_ms: Response time in milliseconds
+        status_code: HTTP status code (if applicable)
+        error_message: Error message if probe failed
+        metrics: Additional metrics from the probe
+        resilience_score: Calculated resilience score (0.0-1.0)
+    """
+
+    probe_id: str
+    target_service: str
+    timestamp: str
+    success: bool
+    response_time_ms: float | None
+    status_code: int | None
+    error_message: str | None
+    metrics: dict[str, Any]
+    resilience_score: float
