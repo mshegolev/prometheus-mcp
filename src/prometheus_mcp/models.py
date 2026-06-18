@@ -315,3 +315,46 @@ class ListAMAlertGroupsOutput(TypedDict):
     total_groups: int
     total_alerts: int
     groups: list[AMAlertGroupItem]
+
+
+# ── Correlation Engine ───────────────────────────────────────────────────────
+
+
+class CorrelatedAlert(TypedDict):
+    alert: AMAlertItem
+    instance: str
+    correlation_score: float
+
+
+class CorrelationGroup(TypedDict):
+    group_id: str
+    alerts: list[CorrelatedAlert]
+    service_identifier: str
+    correlation_strength: float
+
+
+class CascadeRelationship(TypedDict):
+    parent: CorrelatedAlert
+    child: CorrelatedAlert
+    dependency_strength: float
+    temporal_delay: float
+
+
+class CorrelationResult(TypedDict):
+    total_correlations: int
+    correlated_alerts: list[CorrelatedAlert]
+    groups: list[CorrelationGroup]
+    cascades: list[CascadeRelationship]
+    instance_attribution: dict[str, int]
+
+
+class AlertGroupResult(TypedDict):
+    total_groups: int
+    groups: dict[str, list[AMAlertItem]]
+    ungrouped_count: int
+
+
+class CascadeDetectionResult(TypedDict):
+    total_cascades: int
+    cascades: list[CascadeRelationship]
+    root_causes: list[CorrelatedAlert]
