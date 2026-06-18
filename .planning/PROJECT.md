@@ -8,17 +8,16 @@ An MCP server that gives AI agents (Claude, Cursor, CI pipelines) read-only acce
 
 AI agents can autonomously investigate production errors and infrastructure issues by querying Prometheus metrics, metadata, labels, alerts, targets, rules, cardinality, and Alertmanager state — without human intervention or direct API knowledge.
 
-## Current Milestone: v3.0 Federation
+## Current Milestone: v4.0 Advanced Alert Correlation
 
-**Goal:** Enable AI agents to investigate across multiple Prometheus and Alertmanager instances with per-instance configuration, authentication, and cross-cluster query fan-out.
+**Goal:** Enable AI agents to perform sophisticated alert analysis across federated Prometheus instances, identifying root causes, correlating related alerts, and detecting complex failure patterns that span multiple services, clusters, and regions.
 
 **Target features:**
-- JSON config file for named Prometheus/Alertmanager instances
-- Per-instance authentication (Bearer token / Basic auth per instance)
-- Instance listing tool for agent discovery
-- Fan-out queries across multiple instances with __prometheus_instance__ labeling
-- Optional instance parameter added to existing tools for targeted queries
-- Alertmanager federation (multiple AM instances mapped to clusters)
+- Cross-instance alert correlation engine
+- Root cause analysis for cascading failures
+- Alert grouping and pattern recognition across clusters
+- Dependency mapping between services based on metric correlations
+- Enhanced alert context with historical trend analysis
 
 ## Requirements
 
@@ -45,15 +44,20 @@ AI agents can autonomously investigate production errors and infrastructure issu
 - ✓ Health check tool for container orchestrator liveness probes (v2.0)
 - ✓ Metric name caching with TTL for large Prometheus instances (v2.0)
 - ✓ HTTP response size limits for defense-in-depth (v2.0)
+- ✓ JSON config file for named Prometheus/Alertmanager instances
+- ✓ Per-instance authentication (Bearer token / Basic auth per instance)
+- ✓ Instance listing tool for agent discovery
+- ✓ Fan-out queries across multiple instances with __prometheus_instance__ labeling
+- ✓ Optional instance parameter added to existing tools for targeted queries
+- ✓ Alertmanager federation (multiple AM instances mapped to clusters)
 
 ### Active
 
-- [ ] JSON config file for named Prometheus/Alertmanager instances
-- [ ] Per-instance authentication (Bearer token / Basic auth per instance)
-- [ ] Instance listing tool for agent discovery
-- [ ] Fan-out queries across multiple instances with __prometheus_instance__ labeling
-- [ ] Optional instance parameter added to existing tools for targeted queries
-- [ ] Alertmanager federation (multiple AM instances mapped to clusters)
+- [ ] Cross-instance alert correlation engine for identifying related alerts across clusters
+- [ ] Root cause analysis tools for cascading failure detection
+- [ ] Alert grouping based on service dependencies and metric correlations
+- [ ] Historical trend analysis for alert context enrichment
+- [ ] Dependency mapping between services using metric correlation patterns
 
 ### Out of Scope
 
@@ -87,8 +91,9 @@ AI agents can autonomously investigate production errors and infrastructure issu
 | Use existing PrometheusClient for new endpoints | Consistency, connection pooling reuse | Applied (v1.0) |
 | Follow existing dual-channel output pattern | All tools should behave the same way | Applied (v1.0) |
 | Keep synchronous tool functions | Matches existing threading model | Applied (v1.0) |
-| Alertmanager as separate configurable URL | Different service, may not be deployed | Pending (v2.0) |
-| Federation via JSON config file | Named instances with per-instance auth, fan-out queries | Pending (v3.0) |
+| Alertmanager as separate configurable URL | Different service, may not be deployed | Applied (v2.0) |
+| Federation via JSON config file | Named instances with per-instance auth, fan-out queries | Applied (v3.0) |
+| Alert correlation as analytical layer | Separation of concerns, build on existing federation | Pending (v4.0) |
 
 ## Evolution
 
@@ -108,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-08 after milestone v3.0 start*
+*Last updated: 2026-06-18 after milestone v4.0 start*

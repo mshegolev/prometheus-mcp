@@ -1,150 +1,134 @@
-# Roadmap: prometheus-mcp v3.0
+# Roadmap: prometheus-mcp v4.0
 
-**Created:** 2026-06-16
-**Milestone:** v3.0
-**Phases:** 7
+**Created:** 2026-06-18
+**Milestone:** v4.0 Advanced Alert Correlation
+**Phases:** 6
 **Granularity:** coarse
 
 ## Phase Overview
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 1 | Config Schema & Loading | JSON config file parsing, validation, backward-compatible env-var fallback | CFG-01, CFG-02, CFG-04, CFG-06, CFG-07 | 5 |
-| 2 | Instance Registry & Client Management | Thread-safe registry managing N client pairs with per-instance auth and caches | CFG-03, CFG-05, INST-01, INST-03 | 5 |
-| 3 | Core Wiring | Replace singleton clients in _mcp.py with registry pattern, backward-compat gate | — | 3 |
-| 4 | Federation Fan-Out & Merge | Concurrent fan-out queries with ThreadPoolExecutor, result merging, partial failure handling | FED-02, FED-03, FED-04, FED-06 | 5 |
-| 5 | Instance Discovery & Tool Modifications | federation_list_instances tool + instance parameter on all 16 existing tools | INST-02, INST-04, FED-01, FED-05 | 5 |
-| 6 | Alertmanager Federation | Alertmanager multi-instance with fan-out, deduplication by fingerprint | AMF-01, AMF-02, AMF-03, AMF-04 | 4 |
-| 7 | v3.0 Test & Release Prep | End-to-end integration tests, version bump, CHANGELOG, release docs | — | 4 |
+| 8 | Correlation Engine Foundation | Core infrastructure for cross-instance alert analysis with pattern detection and grouping | COR-01, COR-02, COR-03 | 5 |
+| 9 | Root Cause Analysis Tools | Implement anomaly detection, dependency traversal, and change point identification | RCA-01, RCA-02, RCA-03 | 5 |
+| 10 | Dependency Mapping & Health | Build dynamic service dependency maps with cross-cluster awareness and health probing | DEP-01, DEP-02, DEP-03 | 5 |
+| 11 | Trend Analysis & Benchmarking | Add historical pattern recognition, capacity forecasting, and MTTR benchmarking | TRE-01, TRE-02, TRE-03 | 5 |
+| 12 | Integration & Enhancement | Integrate all v4.0 features with existing federation, add new tools, enhance output | — | 4 |
+| 13 | v4.0 Test & Release Prep | Comprehensive testing, version bump, documentation updates | — | 4 |
 
-## Phase 1: Config Schema & Loading
+## Phase 8: Correlation Engine Foundation
 
-**Goal:** Implement JSON config file parsing with Pydantic validation, defaults inheritance, schema versioning (version: 1), and backward-compatible single-instance mode when no config file is present.
+**Goal:** Build the core infrastructure for cross-instance alert analysis, enabling AI agents to identify related alerts across clusters and group them for holistic incident analysis.
 
-**Requirements:** CFG-01, CFG-02, CFG-04, CFG-06, CFG-07
+**Requirements:** COR-01, COR-02, COR-03
 
 **Success Criteria:**
-1. New `config.py` module loads JSON config file specified by PROMETHEUS_MCP_CONFIG env var with Pydantic validation
-2. Config schema has `version: 1` field; missing/unknown versions produce actionable error messages referencing config file path
-3. `defaults` section in config provides shared settings (timeout, ssl_verify, max_response_bytes, cache_ttl) inherited by instances
-4. When PROMETHEUS_MCP_CONFIG is unset, server operates in single-instance mode using existing env vars — zero behavioral change from v2.0
-5. Config validation errors are actionable, referencing file path and instance name (not raw Pydantic errors)
+1. New `correlation.py` module with cross-instance alert matching using temporal windows and label similarity scoring
+2. Alert grouping algorithm that clusters related alerts by service identifiers across all instances
+3. Cascading alert detection with directional dependency inference and correlation strength metrics
+4. Integration with existing federation infrastructure to access alerts from all configured instances
+5. Dual-channel output (markdown + structured JSON) following existing patterns with instance attribution
 
-**Dependencies:** None (foundation phase)
+**Dependencies:** Phase 2 (registry.py), Phase 4 (federation.py)
 
 **UI hint:** no
 
 ---
 
-## Phase 2: Instance Registry & Client Management
+## Phase 9: Root Cause Analysis Tools
 
-**Goal:** Build thread-safe InstanceRegistry that creates and manages N PrometheusClient + AlertmanagerClient pairs with per-instance authentication, per-instance TTL caches, and proper session lifecycle.
+**Goal:** Implement tools for anomaly detection in metrics, dependency chain traversal, and change point detection to help AI agents identify underlying causes of alert cascades.
 
-**Requirements:** CFG-03, CFG-05, INST-01, INST-03
+**Requirements:** RCA-01, RCA-02, RCA-03
 
 **Success Criteria:**
-1. InstanceRegistry creates per-instance PrometheusClient with independent auth (Bearer/Basic) from config
-2. Each instance has its own requests.Session (never shared) and per-instance TTLCache
-3. Per-instance config overrides defaults for timeout, max_response_bytes, and cache_ttl
-4. Registry provides get_prometheus_client(name), get_alertmanager_client(name), list_instances(), all_prometheus_clients(), close_all()
-5. Legacy mode: when no config file, registry creates single "default" entry from env vars — identical to v2.0 behavior
+1. Anomaly detection engine that monitors key metrics for statistical outliers with seasonality adjustment
+2. Dependency traversal algorithm that traces service dependencies from symptoms to potential root causes
+3. Change point detection that correlates recent deployments/config changes with alert onset timing
+4. Ranking system for root cause candidates based on proximity, evidence strength, and impact analysis
+5. Integration with existing tools to enrich alert context with root cause analysis insights
 
-**Dependencies:** Phase 1 (config.py)
+**Dependencies:** Phase 8 (correlation.py), Phase 4 (federation.py)
 
 **UI hint:** no
 
 ---
 
-## Phase 3: Core Wiring
+## Phase 10: Dependency Mapping & Health
 
-**Goal:** Replace singleton client pattern in _mcp.py with registry-based pattern. This is the backward-compatibility gate — ALL existing tests must pass after this change.
+**Goal:** Create dynamic service dependency maps with cross-cluster awareness and implement health probing to assess dependency stability.
 
-**Requirements:** None (internal refactoring)
+**Requirements:** DEP-01, DEP-02, DEP-03
 
 **Success Criteria:**
-1. _mcp.py uses InstanceRegistry instead of _client/_am_client globals; get_client(instance?) and get_alertmanager_client(instance?) route through registry
-2. app_lifespan loads config at startup (eager), creates registry, closes all sessions on shutdown
-3. ALL existing tests pass unchanged when PROMETHEUS_MCP_CONFIG is not set (backward-compat gate)
+1. Dynamic dependency mapper that discovers service relationships through traffic correlation analysis
+2. Cross-cluster dependency visualization showing interoperation between services in different regions
+3. Synthetic health probing system that assesses dependency resilience under various conditions
+4. Real-time dependency maps that differentiate between normal and failure-state interactions
+5. Load shedding recommendations based on dependency fragility assessments
 
-**Dependencies:** Phase 2 (registry.py)
+**Dependencies:** Phase 9 (root cause analysis), Phase 4 (federation.py)
 
 **UI hint:** no
 
 ---
 
-## Phase 4: Federation Fan-Out & Merge
+## Phase 11: Trend Analysis & Benchmarking
 
-**Goal:** Implement concurrent fan-out query execution across multiple Prometheus instances using ThreadPoolExecutor, with result merging strategies per query type, __prometheus_instance__ label injection, partial failure handling, and global response size caps.
+**Goal:** Add historical pattern recognition, capacity forecasting, and MTTR benchmarking to provide AI agents with temporal context for incident investigation.
 
-**Requirements:** FED-02, FED-03, FED-04, FED-06
+**Requirements:** TRE-01, TRE-02, TRE-03
 
 **Success Criteria:**
-1. New `federation.py` module with fan_out_prometheus() using ThreadPoolExecutor for concurrent queries
-2. Merge functions for instant queries, range queries, set values (metrics/labels), and per-instance results (TSDB, health)
-3. __prometheus_instance__ label injected into every metric sample during merging (with collision check)
-4. Partial failure: return available results + error annotations for failed instances; only raise ToolError if ALL instances fail
-5. Global response size caps apply post-merge (not per-instance) — 500 metrics, 5000 range points across all instances
+1. Historical alert pattern recognizer that identifies recurring schedules and seasonal behaviors
+2. Capacity forecasting engine that predicts resource exhaustion based on usage trends
+3. MTTR benchmarking system that compares incident resolution times against historical data
+4. Deviation detection that triggers higher-priority notifications for pattern breaks
+5. Remediation suggestions based on historical resolution techniques and best practices
 
-**Dependencies:** Phase 2 (registry.py for client lists)
+**Dependencies:** Phase 8 (correlation.py), Phase 10 (dependency mapping)
 
 **UI hint:** no
 
 ---
 
-## Phase 5: Instance Discovery & Tool Modifications
+## Phase 12: Integration & Enhancement
 
-**Goal:** Add federation_list_instances discovery tool and optional `instance` parameter to all 16 existing tools for targeted and fan-out queries.
+**Goal:** Fully integrate all v4.0 features with existing federation capabilities, add new MCP tools, and enhance output formats for better AI agent consumption.
 
-**Requirements:** INST-02, INST-04, FED-01, FED-05
+**Requirements:** None (integration phase)
 
 **Success Criteria:**
-1. New `tools_federation.py` with federation_list_instances tool returning instance names, URLs, health status, and federation mode flag
-2. Instance listing performs parallel health probes (/-/healthy) to show reachability
-3. All 8 Prometheus tools in tools.py accept optional `instance` parameter (None=default, name=specific, "all"=fan-out)
-4. All 4 status tools in tools_status.py accept optional `instance` parameter
-5. Fan-out supports subset targeting via `instances` parameter (list of instance names)
+1. New `federation_analyze_alerts` tool combining correlation, RCA, and dependency features
+2. Enhanced existing tools with optional correlation context parameters
+3. Unified output format that combines alerts, metrics, dependencies, and trends
+4. Performance optimization for large-scale correlation across many instances
+5. Comprehensive documentation with examples for all new features
 
-**Dependencies:** Phase 3 (_mcp.py wiring), Phase 4 (federation.py for fan-out)
+**Dependencies:** Phases 8-11
 
 **UI hint:** no
 
 ---
 
-## Phase 6: Alertmanager Federation
+## Phase 13: v4.0 Test & Release Prep
 
-**Goal:** Add Alertmanager multi-instance support with fan-out queries, alert deduplication by fingerprint, and __alertmanager_instance__ label injection.
-
-**Requirements:** AMF-01, AMF-02, AMF-03, AMF-04
-
-**Success Criteria:**
-1. Config file supports named Alertmanager instances with per-instance auth (same pattern as Prometheus instances)
-2. All 4 Alertmanager tools accept optional `instance` parameter for targeted and fan-out queries
-3. Alertmanager fan-out queries execute in parallel with partial failure handling
-4. Alert deduplication by fingerprint when fan-out returns same alert from multiple HA cluster peers
-
-**Dependencies:** Phase 4 (federation.py), Phase 5 (tool modification pattern)
-
-**UI hint:** no
-
----
-
-## Phase 7: v3.0 Test & Release Prep
-
-**Goal:** End-to-end integration tests covering full federation workflow, version bump, CHANGELOG update, and release documentation.
+**Goal:** Comprehensive testing of all v4.0 features, version bump, and documentation updates to prepare for release.
 
 **Requirements:** None (quality phase)
 
 **Success Criteria:**
-1. Integration test: config file with 2+ instances, fan-out query, partial failure, verify merged results with instance labels
-2. Protocol test updated: federation_list_instances in EXPECTED_TOOLS, schema validation passes
-3. All new modules (config, registry, federation, tools_federation) have unit tests with >80% coverage
-4. Version bumped to 0.3.0 in pyproject.toml, __init__.py; CHANGELOG.md updated with v3.0 features; .env.example documents PROMETHEUS_MCP_CONFIG
+1. Integration test covering full correlation workflow: alert matching → grouping → RCA → dependency analysis
+2. Performance test with 10+ instances and 1000+ alerts to validate scalability
+3. All new modules (correlation, rca, dependency, trend) have unit tests with >80% coverage
+4. Version bumped to 0.4.0 in pyproject.toml, __init__.py; CHANGELOG.md updated with v4.0 features
+5. Documentation updated with v4.0 features, examples, and migration guide from v3.0
 
-**Dependencies:** Phase 1-6
+**Dependencies:** Phase 12
 
 **UI hint:** no
 
 ---
 
-*Roadmap created: 2026-06-16*
-*Last updated: 2026-06-16 after initial creation*
+*Roadmap created: 2026-06-18*
+*Last updated: 2026-06-18 after initial creation*
