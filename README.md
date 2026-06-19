@@ -202,6 +202,25 @@ To validate the specification:
 python3 specs/validate_spec.py
 ```
 
+## Automation
+
+This repository includes automated scripts and GitHub Actions workflows to streamline the release process:
+
+### Scripts
+
+- `scripts/auto-commit-push.sh` - Automatically commit and push changes with optional release trigger
+- `scripts/release.sh` - Full release automation including pipeline checking, version bumping, and tagging
+
+### GitHub Actions Workflows
+
+- `post-push-check.yml` - Monitors test pipeline status after each push and comments on the commit
+- `auto-release.yml` - Manual workflow to create releases with version bumping (patch, minor, or major)
+
+To trigger an automated release:
+1. Go to the Actions tab in GitHub
+2. Select "Auto Release" workflow
+3. Run the workflow with your preferred version bump type
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
