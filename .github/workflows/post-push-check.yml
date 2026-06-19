@@ -1,0 +1,48 @@
+name: Post Push Check and Auto Merge
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  check-and-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Wait for test workflow to complete
+        uses: fountainhead/action-wait-for-check@v1.1.0
+        id: wait-for-test
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          checkName: test
+          ref: ${{ github.sha }}
+          timeoutSeconds: 600
+          intervalSeconds: 30
+
+      - name: Check test results
+        if: steps.wait-for-test.outputs.conclusion == 'success'
+        run: |
+          echo "✅ All tests passed! Ready for merge."
+          
+      - name: Comment on commit if tests passed
+        if: steps.wait-for-test.outputs.conclusion == 'success'
+        uses: peter-evans/commit-comment@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ✅ Tests passed successfully!
+            
+            If this is a release candidate, you can trigger the auto-release workflow:
+            1. Go to Actions tab
+            2. Select "Auto Release" workflow
+            3. Run workflow with your preferred version bump type
+
+      - name: Comment on commit if tests failed
+        if: steps.wait-for-test.outputs.conclusion == 'failure'
+        uses: peter-evans/commit-comment@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ❌ Tests failed! Please check the test workflow for details.
