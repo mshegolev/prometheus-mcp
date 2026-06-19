@@ -100,7 +100,7 @@ class AnomalyDetector:
         # Process results from successful instances
         if fan_out_result.get("data") and "result" in fan_out_result["data"]:
             for item in fan_out_result["data"]["result"]:
-                if "metric" in item and "values" in item:
+                if isinstance(item, dict) and "metric" in item and "values" in item:
                     all_series_data.append(item)
 
         # Detect anomalies in collected data

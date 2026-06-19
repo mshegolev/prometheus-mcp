@@ -502,6 +502,20 @@ def prometheus_list_alerts(
             description="Target instance name (omit for default instance)",
         ),
     ] = None,
+    correlation_context: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional correlation context ID from federation_analyze_alerts for enhanced alert analysis.",
+        ),
+    ] = None,
+    include_correlation_info: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="Include correlation-relevant information in output.",
+        ),
+    ] = False,
 ) -> ListAlertsOutput:
     """List all active and pending alerts from Prometheus.
 
@@ -525,7 +539,8 @@ def prometheus_list_alerts(
     Returns:
         dict with ``total_count`` / ``firing_count`` / ``pending_count`` /
         ``state_summary`` / ``alerts`` (list with ``labels``, ``annotations``,
-        ``state``, ``active_at``, ``value``).
+        ``state``, ``active_at``, ``value``). Enhanced with correlation
+        information when requested.
     """
     try:
         client = get_client(instance)

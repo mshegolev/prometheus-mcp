@@ -69,3 +69,4 @@ prometheus-mcp.*.json
 # Dist
 *.tar.gz
 *.whl
+*.tmp

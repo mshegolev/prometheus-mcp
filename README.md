@@ -30,6 +30,38 @@ The existing Prometheus integrations require custom scripts or direct API knowle
 | `prometheus_list_alerts` | `GET /api/v1/alerts` | List active and pending alerts |
 | `prometheus_list_targets` | `GET /api/v1/targets` | List scrape targets by health and job |
 
+## v4.0 Advanced Alert Correlation Features
+
+Version 4.0 introduces powerful new capabilities for AI agents to autonomously investigate production errors:
+
+### Cross-Instance Alert Correlation
+- Automatically identify related alerts across multiple Prometheus instances
+- Group alerts by service identifiers to understand incident scope
+- Detect cascading alert patterns with directional dependency inference
+
+### Root Cause Analysis
+- Anomaly detection in metrics with automatic seasonality adjustment
+- Dependency chain traversal from symptoms to potential root causes
+- Change point detection correlating alerts with recent deployments or config changes
+- Ranked root cause candidates based on evidence strength and impact analysis
+
+### Dependency Mapping & Health
+- Dynamic service dependency maps built from traffic correlation analysis
+- Cross-cluster dependency visualization showing service interoperation
+- Synthetic health probing to assess dependency resilience
+- Load shedding recommendations based on dependency fragility
+
+### Trend Analysis & Benchmarking
+- Historical pattern recognition for recurring alert schedules
+- Capacity forecasting to predict resource exhaustion
+- MTTR benchmarking comparing resolution times against historical data
+- Deviation detection triggering higher-priority notifications for pattern breaks
+
+### Integrated Analysis Tool
+- New `federation_analyze_alerts` tool combining all v4.0 features
+- Unified output format optimized for AI agent consumption
+- Comprehensive incident context in a single tool call
+
 ## Installation
 
 ```bash

@@ -346,6 +346,7 @@ class CorrelationEngine:
             "groups": correlation_groups,
             "cascades": cascades,
             "instance_attribution": dict(instance_attribution),
+            "rca_enhancement": None,  # Placeholder for RCA enhancement
         }
 
     def group_alerts_by_service(self, alerts: list[AMAlertItem]) -> AlertGroupResult:
@@ -364,7 +365,12 @@ class CorrelationEngine:
         if "unknown_service" in groups and not groups["unknown_service"]:
             del groups["unknown_service"]
 
-        return {"total_groups": len(groups), "groups": groups, "ungrouped_count": ungrouped_count}
+        return {
+            "total_groups": len(groups),
+            "groups": groups,
+            "ungrouped_count": ungrouped_count,
+            "rca_enhancement": None,
+        }
 
     def detect_cascading_alerts(self, alerts: list[AMAlertItem], temporal_window: int = 300) -> CascadeDetectionResult:
         """Detect cascading alert patterns with directional dependency inference.
@@ -429,4 +435,9 @@ class CorrelationEngine:
                         logger.warning(f"Error creating cascade relationship: {e}")
                         continue
 
-        return {"total_cascades": len(cascades), "cascades": cascades, "root_causes": root_causes}
+        return {
+            "total_cascades": len(cascades),
+            "cascades": cascades,
+            "root_causes": root_causes,
+            "rca_enhancement": None,
+        }

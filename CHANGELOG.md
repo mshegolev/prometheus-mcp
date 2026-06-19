@@ -5,6 +5,39 @@ All notable changes to `prometheus-mcp` will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 versioning: [SemVer](https://semver.org/).
 
+## [0.4.0] — 2026-06-18
+
+### Added
+
+- **Advanced Alert Correlation**: Cross-instance alert analysis with pattern detection and grouping
+  - Temporal window matching and label similarity scoring for related alerts
+  - Service-based alert grouping across all federated instances
+  - Cascading alert detection with directional dependency inference
+  - Correlation strength metrics with dual-channel output (markdown + JSON)
+
+- **Root Cause Analysis Tools**: Anomaly detection, dependency traversal, and change point identification
+  - Statistical outlier detection in metrics with seasonality adjustment
+  - Service dependency chain traversal from symptoms to potential root causes
+  - Change point detection correlating deployments/config changes with alert onset
+  - Root cause candidate ranking based on proximity, evidence strength, and impact
+
+- **Dependency Mapping & Health**: Dynamic service dependency maps with cross-cluster awareness
+  - Traffic correlation analysis for discovering service relationships
+  - Cross-cluster dependency visualization showing interoperation between services
+  - Synthetic health probing assessing dependency resilience under various conditions
+  - Load shedding recommendations based on dependency fragility assessments
+
+- **Trend Analysis & Benchmarking**: Historical pattern recognition and capacity forecasting
+  - Recurring schedule identification and seasonal behavior detection
+  - Resource exhaustion prediction based on usage trends
+  - MTTR benchmarking comparing resolution times against historical data
+  - Deviation detection triggering higher-priority notifications for pattern breaks
+
+- **Integrated Federation Analysis**: Unified tool combining all v4.0 features
+  - New `federation_analyze_alerts` tool for comprehensive incident investigation
+  - Enhanced existing tools with optional correlation context parameters
+  - Unified output format combining alerts, metrics, dependencies, and trends
+
 ## [0.3.0] — 2026-06-18
 
 ### Added
