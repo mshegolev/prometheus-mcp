@@ -484,96 +484,37 @@ class ChangePointDetector:
         self.registry = registry
 
     def detect_change_points(self, alert_timestamps: list[str], time_window: int = 3600) -> ChangePointDetectionResult:
-        """Detect change points around alert timestamps.
+        """Detect deployment/config/scaling change points around alert timestamps.
+
+        Change-point detection requires an external change source — a deployment
+        tracker, a config-management audit log, or CI/CD event stream — to
+        correlate infrastructure changes with alert timing. No such source is
+        wired into this server, so this returns an **empty** result rather than
+        fabricating plausible-looking events. Input timestamps are still parsed
+        and validated so a real detector can drop in without changing the
+        interface or any downstream consumer (:meth:`RootCauseRanker.rank_candidates`
+        simply contributes no change-score when ``events`` is empty).
 
         Args:
             alert_timestamps: List of alert start timestamps in ISO format
             time_window: Time window in seconds to search for changes (default: 1 hour)
 
         Returns:
-            ChangePointDetectionResult with detected change events
+            ChangePointDetectionResult with an empty ``events`` list until a
+            change source is integrated.
         """
-        # In a real implementation, this would query deployment tracking systems
-        # For now, we'll simulate change detection based on common patterns
-
-        change_events = []
-
-        # Convert alert timestamps to datetime objects
-        alert_datetimes = []
+        # Validate/parse input timestamps (kept so a real detector can consume
+        # them unchanged); malformed values are logged and skipped, never fatal.
         for ts_str in alert_timestamps:
             try:
-                dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                alert_datetimes.append(dt)
+                datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             except Exception as e:
                 logger.warning(f"Failed to parse timestamp {ts_str}: {e}")
-                continue
 
-        # Simulate common change patterns
-        for alert_dt in alert_datetimes:
-            # Look for changes in the time window before the alert.
-            # (The concrete window bound is computed by the real detectors; this
-            # simulation only needs the alert timestamp below.)
-
-            # Simulate detection of various change types
-            # In practice, this would query actual deployment/config tracking systems
-
-            # Common deployment patterns
-            change_events.append(
-                {
-                    "timestamp": (alert_dt - timedelta(minutes=15)).isoformat(),
-                    "event_type": "deployment",
-                    "description": "Service deployment detected",
-                    "correlation_strength": 0.8,
-                    "affected_services": ["unknown_service"],  # Would be determined in real implementation
-                }
-            )
-
-            # Configuration changes
-            change_events.append(
-                {
-                    "timestamp": (alert_dt - timedelta(minutes=30)).isoformat(),
-                    "event_type": "config_change",
-                    "description": "Configuration update detected",
-                    "correlation_strength": 0.6,
-                    "affected_services": ["unknown_service"],
-                }
-            )
-
-            # Scaling events
-            change_events.append(
-                {
-                    "timestamp": (alert_dt - timedelta(minutes=45)).isoformat(),
-                    "event_type": "scaling_event",
-                    "description": "Service scaling activity detected",
-                    "correlation_strength": 0.4,
-                    "affected_services": ["unknown_service"],
-                }
-            )
-
-        # Remove duplicates and sort by timestamp
-        unique_events = []
-        seen_events = set()
-        for event in change_events:
-            event_key = (event["timestamp"], event["event_type"])
-            if event_key not in seen_events:
-                seen_events.add(event_key)
-                unique_events.append(event)
-
-        # Sort by timestamp
-        unique_events.sort(key=lambda x: x["timestamp"])
-
+        # No external change source configured → do not fabricate change events.
         return {
-            "total_events": len(unique_events),
-            "events": [
-                {
-                    "timestamp": event["timestamp"],
-                    "event_type": event["event_type"],
-                    "description": event["description"],
-                    "correlation_strength": event["correlation_strength"],
-                    "affected_services": event["affected_services"],
-                }
-                for event in unique_events
-            ],
+            "total_events": 0,
+            "events": [],
             "time_window": {"duration_seconds": time_window, "search_backwards": True},
             "correlation_threshold": 0.3,
         }

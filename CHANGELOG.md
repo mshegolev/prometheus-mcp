@@ -7,6 +7,19 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **RCA change-point detection no longer fabricates events.** With
+  `correlate_alerts_across_instances(enable_rca=True)`, `RCAEngine` ran
+  `ChangePointDetector.detect_change_points`, which invented deployment /
+  config / scaling events (fixed 15/30/45-minute offsets, hardcoded
+  `correlation_strength` of 0.8/0.6/0.4, `affected_services: ["unknown_service"]`)
+  for every alert timestamp — plausible-looking data returned to users as
+  fact. It now returns an empty result (no external change source is wired
+  up) while still validating input timestamps, so a real detector can drop in
+  without changing the interface. Downstream ranking contributes no
+  change-score when there are no events.
+
 ## [0.4.2] — 2026-07-07
 
 ### Fixed

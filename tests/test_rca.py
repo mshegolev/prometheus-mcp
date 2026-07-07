@@ -423,76 +423,47 @@ class TestChangePointDetector(unittest.TestCase):
 
         self.detector = ChangePointDetector(self.mock_registry)
 
-    def test_detect_change_points_aligned_with_alerts(self) -> None:
-        """Test detection of deployment events aligned with alert timing."""
-        # Alert timestamps
-        alert_timestamps = [
-            "2023-01-01T10:00:00Z",  # Alert starts
-        ]
+    def test_detect_change_points_returns_documented_structure(self) -> None:
+        """The result carries the documented ChangePointDetectionResult shape."""
+        result = self.detector.detect_change_points(["2023-01-01T10:00:00Z"], time_window=3600)
 
-        result = self.detector.detect_change_points(alert_timestamps, time_window=3600)
-
-        # Should return change point result structure
         self.assertIn("total_events", result)
         self.assertIn("events", result)
         self.assertIn("time_window", result)
+        self.assertIn("correlation_threshold", result)
+        self.assertEqual(result["time_window"]["duration_seconds"], 3600)
 
-        # Should detect some simulated change events
-        self.assertGreaterEqual(result["total_events"], 1)
+    def test_detect_change_points_does_not_fabricate_events(self) -> None:
+        """No external change source is wired up, so events must be empty.
 
-        # Events should have expected structure
-        if result["events"]:
-            event = result["events"][0]
-            self.assertIn("timestamp", event)
-            self.assertIn("event_type", event)
-            self.assertIn("description", event)
-            self.assertIn("correlation_strength", event)
-
-    def test_detect_change_points_configuration_changes(self) -> None:
-        """Test correlation of configuration changes with metric anomalies."""
-        # Multiple alert timestamps
+        Guards against the earlier behaviour where the detector invented
+        deployment/config/scaling events with plausible correlation scores,
+        which a published tool would have returned to users as fact.
+        """
         alert_timestamps = [
             "2023-01-01T10:00:00Z",
             "2023-01-01T10:05:00Z",
             "2023-01-01T10:10:00Z",
         ]
 
-        result = self.detector.detect_change_points(alert_timestamps, time_window=1800)  # 30 min window
+        result = self.detector.detect_change_points(alert_timestamps, time_window=1800)
 
-        # Should detect change events for multiple alerts
-        self.assertGreaterEqual(result["total_events"], 3)  # At least one per alert
+        self.assertEqual(result["total_events"], 0)
+        self.assertEqual(result["events"], [])
 
-        # Should have different event types
-        event_types = set(event["event_type"] for event in result["events"])
-        self.assertIn("deployment", event_types)
-        self.assertIn("config_change", event_types)
-        self.assertIn("scaling_event", event_types)
+    def test_detect_change_points_empty_input(self) -> None:
+        """No timestamps → empty, well-formed result (no crash)."""
+        result = self.detector.detect_change_points([], time_window=3600)
 
-    def test_detect_change_points_unrelated_changes(self) -> None:
-        """Test that unrelated changes don't produce false correlations."""
-        # Alert timestamps
-        alert_timestamps = [
-            "2023-01-01T10:00:00Z",
-        ]
+        self.assertEqual(result["total_events"], 0)
+        self.assertEqual(result["events"], [])
 
-        result = self.detector.detect_change_points(alert_timestamps, time_window=60)  # Very short window
+    def test_detect_change_points_tolerates_malformed_timestamps(self) -> None:
+        """Malformed timestamps are logged and skipped, never fatal."""
+        result = self.detector.detect_change_points(["not-a-timestamp", "2023-01-01T10:00:00Z", ""], time_window=3600)
 
-        # With short window, might detect fewer events
-        self.assertGreaterEqual(result["total_events"], 0)
-
-    def test_detect_change_points_multiple_changes(self) -> None:
-        """Test detection with multiple changes around alert timing."""
-        # Multiple alerts close together
-        alert_timestamps = [
-            "2023-01-01T10:00:00Z",
-            "2023-01-01T10:02:00Z",
-            "2023-01-01T10:04:00Z",
-        ]
-
-        result = self.detector.detect_change_points(alert_timestamps, time_window=3600)
-
-        # Should consolidate duplicate events
-        self.assertGreaterEqual(result["total_events"], 1)
+        self.assertEqual(result["total_events"], 0)
+        self.assertEqual(result["events"], [])
 
         # Should sort events by timestamp
         events = result["events"]
