@@ -158,5 +158,21 @@ Plans:
 
 ---
 
+## Phase Completion
+
+All v4.0 phases are complete and shipped (released as v0.4.3 on PyPI).
+
+- [x] Phase 8: Correlation Engine Foundation (completed 2026-06-18)
+- [x] Phase 9: Root Cause Analysis Tools (completed 2026-06-18)
+- [x] Phase 10: Dependency Mapping & Health (completed 2026-06-18)
+- [x] Phase 11: Trend Analysis & Benchmarking (completed 2026-06-18)
+- [x] Phase 12: Integration & Enhancement (completed 2026-06-18)
+- [x] Phase 13: v4.0 Test & Release Prep (completed 2026-06-18)
+
+> Note: Phases 10 and 11 shipped simulated logic (flagged EXPERIMENTAL in code);
+> making them production-real is deferred to a future milestone. See STATE.md.
+
+---
+
 *Roadmap created: 2026-06-18*
-*Last updated: 2026-06-18 after initial creation*
+*Last updated: 2026-07-08 — phase-completion markers added; artifacts reconciled with released reality*
