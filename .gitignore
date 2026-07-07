@@ -70,3 +70,6 @@ prometheus-mcp.*.json
 *.tar.gz
 *.whl
 *.tmp
+
+# Serena
+.serena/

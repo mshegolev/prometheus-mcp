@@ -62,6 +62,22 @@ async def app_lifespan(_app: FastMCP) -> AsyncIterator[dict[str, Any]]:
 mcp = FastMCP("prometheus_mcp", lifespan=app_lifespan)
 
 
+def get_registry() -> InstanceRegistry:
+    """Return the live :class:`InstanceRegistry`.
+
+    Tools MUST call this at request time rather than importing the
+    module-global ``_registry`` by value: ``_registry`` is ``None`` at import
+    and only assigned during :func:`app_lifespan` startup, so a captured
+    ``from _mcp import _registry`` binding stays frozen at ``None`` forever.
+
+    Raises:
+        RuntimeError: If the registry has not been initialized (app not started).
+    """
+    if _registry is None:
+        raise RuntimeError("Registry not initialized - app not started")
+    return _registry
+
+
 def get_client(instance: str | None = None) -> PrometheusClient:
     """Return a :class:`PrometheusClient` for the specified instance.
 

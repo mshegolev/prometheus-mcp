@@ -5,6 +5,42 @@ All notable changes to `prometheus-mcp` will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **v4.0 correlation/federation tools were never registered.** `server.py`
+  imported only `tools`, `tools_alertmanager`, and `tools_status`, so the
+  `@mcp.tool` decorators in `tools_correlation` and `tools_federation` never
+  ran against the live server. The four tools
+  (`correlate_alerts_across_instances`, `group_alerts_by_service`,
+  `detect_cascading_alerts`, `federation_list_instances`) are now wired into
+  `server.py` and exposed. Unit tests passed only because they imported the
+  modules directly.
+- **Frozen `None` registry.** `tools_correlation` and `tools_federation_v4`
+  captured `from _mcp import _registry` by value at import time, when it is
+  still `None` (it is assigned during lifespan startup). Tools now call a new
+  `_mcp.get_registry()` accessor that reads the live global at call time.
+- **`federation_list_instances` import crash.** Its return type was a fieldless
+  `dict` subclass used with `structured_output=True`, which FastMCP cannot turn
+  into an output schema (`InvalidSignature`). Replaced with a proper
+  `ListInstancesOutput` TypedDict in `models.py`. Also dropped a bogus
+  `mcp.state.get("registry")` lookup (`mcp` has no `state` attribute).
+
+### Added
+
+- `tests/test_server_registration.py`: smoke test asserting the exact set of
+  tools the server entry point exposes — guards against unregistered modules.
+
+### Known issues
+
+- **`federation_analyze_alerts` (`tools_federation_v4`) is NOT registered.** Its
+  implementation references APIs that do not exist (`PrometheusClient.list_alerts`/
+  `query`/`instance_name`, `RCAEngine(clients)` vs the real `(registry)`
+  constructor, `output.warn`, `output.ok(content=…, structured_content=…)`,
+  `CorrelationResult.dict()`, `registry.get_all_clients()`). It must be rewritten
+  against the real engine/client APIs before it can be exposed.
+
 ## [0.4.0] — 2026-06-18
 
 ### Added

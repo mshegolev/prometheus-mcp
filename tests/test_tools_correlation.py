@@ -28,18 +28,19 @@ class TestToolsCorrelationWithRCA(unittest.TestCase):
         self.mock_registry.list_instances.return_value = ["instance1"]
         self.mock_registry.get_alertmanager_client.return_value = self.mock_am_client
 
-        # Store original registry reference
-        import prometheus_mcp.tools_correlation
+        # Install the mock on the live global that get_registry() reads at
+        # call time (tools no longer capture _registry by value at import).
+        import prometheus_mcp._mcp
 
-        self.original_registry = prometheus_mcp.tools_correlation._registry
-        prometheus_mcp.tools_correlation._registry = self.mock_registry
+        self.original_registry = prometheus_mcp._mcp._registry
+        prometheus_mcp._mcp._registry = self.mock_registry
 
     def tearDown(self) -> None:
         """Clean up test fixtures."""
         # Restore original registry
-        import prometheus_mcp.tools_correlation
+        import prometheus_mcp._mcp
 
-        prometheus_mcp.tools_correlation._registry = self.original_registry
+        prometheus_mcp._mcp._registry = self.original_registry
 
     @patch("prometheus_mcp.tools_correlation.RCA_AVAILABLE", True)
     def test_correlate_alerts_with_rca_enabled(self) -> None:
@@ -219,9 +220,9 @@ class TestToolsCorrelationWithRCA(unittest.TestCase):
     def test_tool_error_handling(self) -> None:
         """Test that tools handle registry unavailability gracefully."""
         # Make registry unavailable
-        import prometheus_mcp.tools_correlation
+        import prometheus_mcp._mcp
 
-        prometheus_mcp.tools_correlation._registry = None
+        prometheus_mcp._mcp._registry = None
 
         # Should raise ToolError when registry is unavailable
         with self.assertRaises(ToolError):

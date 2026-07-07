@@ -660,3 +660,26 @@ class LoadSheddingRecommendation(TypedDict):
     alternatives: list[dict[str, Any]]
     estimated_impact: dict[str, Any] | None
     implementation_guide: list[str] | None
+
+
+# ── Federation: list instances ──────────────────────────────────────────────
+
+
+class FederationInstanceItem(TypedDict):
+    """Health + discovery info for a single configured instance."""
+
+    name: str
+    prometheus_url: str
+    alertmanager_url: str
+    type: str
+    reachable: bool
+    response_time_ms: float | None
+    error: str | None
+
+
+class ListInstancesOutput(TypedDict):
+    """Structured output for the ``federation_list_instances`` tool."""
+
+    instances: list[FederationInstanceItem]
+    federation_enabled: bool
+    total_count: int

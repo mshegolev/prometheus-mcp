@@ -13,7 +13,7 @@ from typing import Annotated
 from pydantic import Field
 
 from prometheus_mcp import output
-from prometheus_mcp._mcp import _registry, mcp
+from prometheus_mcp._mcp import get_registry, mcp
 from prometheus_mcp.correlation import CorrelationEngine
 from prometheus_mcp.models import (
     AlertGroupResult,
@@ -84,7 +84,7 @@ def correlate_alerts_across_instances(
     """
     try:
         # Get registry
-        registry = _registry
+        registry = get_registry()
         if registry is None:
             return output.fail(Exception("Registry not available"), "correlating alerts")
 
@@ -307,7 +307,7 @@ def group_alerts_by_service(
     """
     try:
         # Get registry
-        registry = _registry
+        registry = get_registry()
         if registry is None:
             return output.fail(Exception("Registry not available"), "grouping alerts by service")
 
@@ -441,7 +441,7 @@ def detect_cascading_alerts(
     """
     try:
         # Get registry
-        registry = _registry
+        registry = get_registry()
         if registry is None:
             return output.fail(Exception("Registry not available"), "detecting cascading alerts")
 

@@ -8,11 +8,11 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import time
-from typing import Any, Literal
 
 from prometheus_mcp import output
-from prometheus_mcp._mcp import mcp
+from prometheus_mcp._mcp import get_registry, mcp
 from prometheus_mcp.client import PrometheusClient
+from prometheus_mcp.models import ListInstancesOutput
 
 logger = logging.getLogger(__name__)
 
@@ -23,19 +23,13 @@ _WORKER_BUFFER = 4
 
 
 class InstanceHealth(dict):
-    """Health status information for a single instance."""
+    """Health status information for a single instance (internal helper type)."""
 
     pass
 
 
 class InstanceInfo(dict):
-    """Discovery information for a single instance."""
-
-    pass
-
-
-class ListInstancesOutput(dict):
-    """Structured output for federation_list_instances tool."""
+    """Discovery information for a single instance (internal helper type)."""
 
     pass
 
@@ -143,18 +137,8 @@ def federation_list_instances() -> ListInstancesOutput:
         dict with ``instances`` (list of instance info) and ``federation_enabled`` (bool).
     """
     try:
-        # Get registry from app state
-        registry = mcp.state.get("registry")
-        if registry is None:
-            # This shouldn't happen in normal operation
-            return output.ok(
-                {
-                    "instances": [],
-                    "federation_enabled": False,
-                    "total_count": 0,
-                },
-                "## Federated Instances\n\nNo federation configuration found.",
-            )
+        # Read the live registry at call time (never import _registry by value).
+        registry = get_registry()
 
         # Get instance information
         instance_names = registry.list_instances()
