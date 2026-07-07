@@ -3,25 +3,21 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from prometheus_mcp.dependency import (
-    TrafficCorrelator,
-    DependencyGraphBuilder,
     CrossClusterVisualizer,
-    HealthProber,
-    StateDifferentiator,
-    LoadSheddingAdvisor,
+    DependencyGraphBuilder,
     DependencyMappingEngine,
+    HealthProber,
+    LoadSheddingAdvisor,
+    StateDifferentiator,
+    TrafficCorrelator,
 )
 from prometheus_mcp.models import (
-    AMAlertItem,
     CorrelationAnalysisResult,
-    DependencyGraph,
-    ServiceNode,
     DependencyEdge,
-    CrossClusterInfo,
+    DependencyGraph,
 )
 
 

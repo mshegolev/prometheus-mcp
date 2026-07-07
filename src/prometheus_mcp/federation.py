@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import threading
-import time
 from collections.abc import Callable
-from typing import Any, TypeVar, Union
+from typing import TypeVar
 
-from prometheus_mcp.client import PrometheusClient
 from prometheus_mcp.alertmanager_client import AlertmanagerClient
+from prometheus_mcp.client import PrometheusClient
 from prometheus_mcp.models import (
     InstantSample,
     ListMetricsOutput,
@@ -41,7 +39,7 @@ ERROR_TYPE_TIMEOUT = "timeout"
 ERROR_TYPE_VALIDATION = "validation"
 
 T = TypeVar("T")
-ClientType = Union[PrometheusClient, AlertmanagerClient]
+ClientType = PrometheusClient | AlertmanagerClient
 
 
 class InstanceError(dict):
@@ -109,7 +107,7 @@ def _execute_query_on_instance(
             response = getattr(exc, "response", None)
             if response is not None:
                 status_code = getattr(response, "status_code", None)
-        except:
+        except Exception:
             # If accessing response attributes fails, continue with None
             pass
 
@@ -169,7 +167,7 @@ def fan_out_prometheus(
         # Submit all tasks
         future_to_instance = {
             executor.submit(_execute_query_on_instance, client, query_func, name, timeout): name
-            for client, name in zip(clients, instance_names)
+            for client, name in zip(clients, instance_names, strict=False)
         }
 
         # Collect results as they complete
@@ -226,7 +224,7 @@ def fan_out_prometheus(
         # Submit all tasks
         future_to_instance = {
             executor.submit(_execute_query_on_instance, client, query_func, name, timeout): name
-            for client, name in zip(clients, instance_names)
+            for client, name in zip(clients, instance_names, strict=False)
         }
 
         # Collect results as they complete
@@ -283,7 +281,7 @@ def fan_out_prometheus(
         # Submit all tasks
         future_to_instance = {
             executor.submit(_execute_query_on_instance, client, query_func, name, timeout): name
-            for client, name in zip(clients, instance_names)
+            for client, name in zip(clients, instance_names, strict=False)
         }
 
         # Collect results as they complete

@@ -8,9 +8,9 @@ context for incident investigation.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
+from datetime import datetime
+from typing import Any
 
 from prometheus_mcp.models import AlertItem, RangeSeries
 
@@ -21,9 +21,9 @@ class PatternRecognizer:
     """Recognizes historical patterns in alerts and metrics."""
 
     def __init__(self):
-        self.patterns: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self.patterns: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
-    def identify_recurring_schedules(self, alerts: List[AlertItem]) -> Dict[str, Dict[str, List[int]]]:
+    def identify_recurring_schedules(self, alerts: list[AlertItem]) -> dict[str, dict[str, list[int]]]:
         """Identify recurring alert schedules based on alert timestamps.
 
         Args:
@@ -32,7 +32,7 @@ class PatternRecognizer:
         Returns:
             Dictionary mapping alert names to dictionaries with recurring hours and days
         """
-        schedule_patterns: Dict[str, Dict[str, List[int]]] = defaultdict(lambda: {"hours": [], "days": []})
+        schedule_patterns: dict[str, dict[str, list[int]]] = defaultdict(lambda: {"hours": [], "days": []})
 
         # Group alerts by name and extract hours
         alert_groups = defaultdict(list)
@@ -69,7 +69,7 @@ class PatternRecognizer:
 
         return dict(schedule_patterns)
 
-    def identify_seasonal_behaviors(self, metrics: List[RangeSeries]) -> Dict[str, Dict[str, Any]]:
+    def identify_seasonal_behaviors(self, metrics: list[RangeSeries]) -> dict[str, dict[str, Any]]:
         """Identify seasonal patterns in metric data.
 
         Args:
@@ -126,7 +126,7 @@ class ForecastingEngine:
 
     def predict_resource_exhaustion(
         self, metric_series: RangeSeries, threshold: float, forecast_horizon_hours: int = 24
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Predict when a resource might be exhausted based on current trends.
 
         Args:
@@ -202,7 +202,7 @@ class ForecastingEngine:
 
     def forecast_capacity_utilization(
         self, metric_series: RangeSeries, forecast_steps: int = 10
-    ) -> List[Tuple[float, float]]:
+    ) -> list[tuple[float, float]]:
         """Forecast future capacity utilization based on historical data.
 
         Args:
@@ -275,7 +275,7 @@ class MTTRBenchmark:
 
     def __init__(self):
         # Store historical resolution times by alert type
-        self.resolution_times: Dict[str, List[float]] = defaultdict(list)
+        self.resolution_times: dict[str, list[float]] = defaultdict(list)
 
     def record_resolution_time(self, alert_name: str, resolution_seconds: float):
         """Record the resolution time for an alert.
@@ -286,7 +286,7 @@ class MTTRBenchmark:
         """
         self.resolution_times[alert_name].append(resolution_seconds)
 
-    def compare_against_historical(self, alert_name: str, current_resolution_seconds: float) -> Dict[str, Any]:
+    def compare_against_historical(self, alert_name: str, current_resolution_seconds: float) -> dict[str, Any]:
         """Compare current resolution time against historical data.
 
         Args:
@@ -318,7 +318,7 @@ class MTTRBenchmark:
             "percentage_difference": percentage_diff,
         }
 
-    def get_benchmark_stats(self, alert_name: str) -> Optional[Dict[str, float]]:
+    def get_benchmark_stats(self, alert_name: str) -> dict[str, float] | None:
         """Get benchmark statistics for an alert type.
 
         Args:
@@ -347,9 +347,9 @@ class DeviationDetector:
 
     def __init__(self, pattern_recognizer: PatternRecognizer):
         self.pattern_recognizer = pattern_recognizer
-        self.baselines: Dict[str, Dict[str, Any]] = {}
+        self.baselines: dict[str, dict[str, Any]] = {}
 
-    def set_baseline(self, metric_name: str, baseline_data: Dict[str, Any]):
+    def set_baseline(self, metric_name: str, baseline_data: dict[str, Any]):
         """Set baseline data for a metric.
 
         Args:
@@ -358,7 +358,7 @@ class DeviationDetector:
         """
         self.baselines[metric_name] = baseline_data
 
-    def detect_pattern_breaks(self, current_data: Dict[str, Any], metric_name: str) -> Optional[Dict[str, Any]]:
+    def detect_pattern_breaks(self, current_data: dict[str, Any], metric_name: str) -> dict[str, Any] | None:
         """Detect if current data deviates significantly from baseline.
 
         Args:
@@ -395,9 +395,9 @@ class RemediationSuggester:
 
     def __init__(self):
         # Store historical resolution techniques
-        self.resolution_techniques: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self.resolution_techniques: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
-    def add_resolution_technique(self, alert_type: str, technique: Dict[str, Any]):
+    def add_resolution_technique(self, alert_type: str, technique: dict[str, Any]):
         """Add a successful resolution technique for an alert type.
 
         Args:
@@ -406,7 +406,7 @@ class RemediationSuggester:
         """
         self.resolution_techniques[alert_type].append(technique)
 
-    def suggest_remediations(self, alert_type: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def suggest_remediations(self, alert_type: str, context: dict[str, Any]) -> list[dict[str, Any]]:
         """Suggest remediation approaches based on historical data.
 
         Args:
@@ -439,7 +439,7 @@ class RemediationSuggester:
 
 
 # Main interface functions
-def analyze_trends(alerts: List[AlertItem], metrics: List[RangeSeries]) -> Dict[str, Any]:
+def analyze_trends(alerts: list[AlertItem], metrics: list[RangeSeries]) -> dict[str, Any]:
     """Analyze trends in alerts and metrics.
 
     Args:
@@ -476,7 +476,7 @@ def analyze_trends(alerts: List[AlertItem], metrics: List[RangeSeries]) -> Dict[
     return results
 
 
-def benchmark_resolution_times(alerts: List[AlertItem]) -> Dict[str, Any]:
+def benchmark_resolution_times(alerts: list[AlertItem]) -> dict[str, Any]:
     """Benchmark alert resolution times.
 
     Args:
@@ -510,7 +510,7 @@ def benchmark_resolution_times(alerts: List[AlertItem]) -> Dict[str, Any]:
     return results
 
 
-def detect_deviations(current_metrics: List[RangeSeries], baselines: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def detect_deviations(current_metrics: list[RangeSeries], baselines: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Detect deviations from established baselines.
 
     Args:

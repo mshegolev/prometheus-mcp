@@ -22,15 +22,17 @@ from prometheus_mcp.models import (
     CorrelationResult,
 )
 
-# RCA imports for enhanced correlation
+# RCA imports for enhanced correlation. These are import-availability probes:
+# the names are not referenced here (the RCA path re-imports RCAEngine locally),
+# only the RCA_AVAILABLE flag gates optional behaviour — so F401 is suppressed.
 try:
-    from prometheus_mcp.rca import RCAEngine
     from prometheus_mcp.models import (
-        AnomalyDetectionResult,
-        DependencyTraversalResult,
-        ChangePointDetectionResult,
-        RootCauseRankingResult,
+        AnomalyDetectionResult,  # noqa: F401
+        ChangePointDetectionResult,  # noqa: F401
+        DependencyTraversalResult,  # noqa: F401
+        RootCauseRankingResult,  # noqa: F401
     )
+    from prometheus_mcp.rca import RCAEngine  # noqa: F401
 
     RCA_AVAILABLE = True
 except ImportError:
@@ -321,7 +323,7 @@ def group_alerts_by_service(
             try:
                 registry.get_alertmanager_client(name)
                 am_instance_names.append(name)
-            except:
+            except Exception:
                 pass
 
         # Collect alerts from all instances
@@ -353,7 +355,7 @@ def group_alerts_by_service(
                         alerts.append(alert_item)
                     all_alerts.extend(alerts)
 
-                except Exception as e:
+                except Exception:
                     continue
 
         # Initialize correlation engine
@@ -455,7 +457,7 @@ def detect_cascading_alerts(
             try:
                 registry.get_alertmanager_client(name)
                 am_instance_names.append(name)
-            except:
+            except Exception:
                 pass
 
         # Collect alerts from all instances
@@ -487,7 +489,7 @@ def detect_cascading_alerts(
                         alerts.append(alert_item)
                     all_alerts.extend(alerts)
 
-                except Exception as e:
+                except Exception:
                     continue
 
         # Initialize correlation engine

@@ -1,11 +1,10 @@
 """Integration tests for prometheus-mcp v4.0 features."""
 
 import pytest
-from unittest.mock import Mock, patch
 
 from prometheus_mcp.correlation import CorrelationEngine
-from prometheus_mcp.rca import RCAEngine
 from prometheus_mcp.dependency import DependencyMappingEngine
+from prometheus_mcp.rca import RCAEngine
 from prometheus_mcp.trend_analysis import analyze_trends, benchmark_resolution_times
 
 

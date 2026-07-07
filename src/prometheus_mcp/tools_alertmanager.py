@@ -91,7 +91,7 @@ def alertmanager_list_silences(
                     try:
                         registry.get_alertmanager_client(name)
                         am_instance_names.append(name)
-                    except:
+                    except Exception:
                         pass
                 client_names = am_instance_names
             else:
@@ -104,7 +104,7 @@ def alertmanager_list_silences(
                             client = registry.get_alertmanager_client(inst_name)
                             clients.append(client)
                             client_names.append(inst_name)
-                        except Exception as e:
+                        except Exception:
                             # Skip invalid instances for now - federation should handle this
                             pass
 

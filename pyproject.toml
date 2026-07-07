@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prometheus-mcp"
-version = "0.4.1"
+version = "0.4.2"
 description = "MCP server for Prometheus and Alertmanager — query metrics, inspect alerts, explore targets, check cardinality, and investigate incidents (read-only)."
 readme = "README.md"
 license = "MIT"

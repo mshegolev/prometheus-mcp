@@ -15,26 +15,21 @@ import logging
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Tuple, Union
+from typing import TYPE_CHECKING, Any
 
+from prometheus_mcp.federation import fan_out_prometheus
 from prometheus_mcp.models import (
-    AMAlertItem,
     ClusterInfo,
     CorrelationAnalysisResult,
     CrossClusterInfo,
     DependencyAnalysisResult,
     DependencyEdge,
     DependencyGraph,
-    HealthProbeResult,
     ServiceNode,
-    SyntheticProbe,
-    VisualizationResult,
 )
-from prometheus_mcp.federation import fan_out_prometheus
 
 if TYPE_CHECKING:
     from prometheus_mcp.registry import InstanceRegistry
-    from prometheus_mcp.client import PrometheusClient
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +68,7 @@ class TrafficCorrelator:
             try:
                 self.registry.get_prometheus_client(name)
                 prom_instance_names.append(name)
-            except:
+            except Exception:
                 pass
 
         # Collect traffic metric data from all instances
@@ -298,7 +293,6 @@ class DependencyGraphBuilder:
 
         # Build dependency edges
         edges: list[DependencyEdge] = []
-        confidence_scores = correlation_data.get("confidence_scores", {})
 
         for corr in correlation_data.get("correlations", []):
             edge: DependencyEdge = {

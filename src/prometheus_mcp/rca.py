@@ -13,22 +13,21 @@ import logging
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Tuple, Union
+from typing import TYPE_CHECKING
 
+from prometheus_mcp.federation import fan_out_prometheus
 from prometheus_mcp.models import (
     AMAlertItem,
     AnomalyDetectionResult,
     ChangePointDetectionResult,
-    ChangePointEvent,
     DependencyTraversalResult,
     RootCauseCandidate,
     RootCauseRankingResult,
 )
-from prometheus_mcp.federation import fan_out_prometheus
 
 if TYPE_CHECKING:
-    from prometheus_mcp.registry import InstanceRegistry
     from prometheus_mcp.client import PrometheusClient
+    from prometheus_mcp.registry import InstanceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +67,7 @@ class AnomalyDetector:
             try:
                 self.registry.get_prometheus_client(name)
                 prom_instance_names.append(name)
-            except:
+            except Exception:
                 pass
 
         # Collect metric data from all instances
@@ -282,7 +281,7 @@ class DependencyTraverser:
             try:
                 self.registry.get_alertmanager_client(name)
                 am_instance_names.append(name)
-            except:
+            except Exception:
                 pass
 
         # Collect alerts from all instances to build correlation data
@@ -511,8 +510,9 @@ class ChangePointDetector:
 
         # Simulate common change patterns
         for alert_dt in alert_datetimes:
-            # Look for changes in the time window before the alert
-            window_start = alert_dt - timedelta(seconds=time_window)
+            # Look for changes in the time window before the alert.
+            # (The concrete window bound is computed by the real detectors; this
+            # simulation only needs the alert timestamp below.)
 
             # Simulate detection of various change types
             # In practice, this would query actual deployment/config tracking systems

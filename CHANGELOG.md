@@ -7,6 +7,31 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-07-07
+
+### Fixed
+
+- **Registry lazy-init regression (79 failing tests).** The v3.0 Federation
+  refactor replaced the lazy-initialised client singleton with an
+  `InstanceRegistry` that is only populated by `app_lifespan`. As a result
+  `get_client()` / `get_alertmanager_client()` raised
+  `RuntimeError: Registry not initialized` whenever a tool function was called
+  without the server lifespan running — which is exactly how the integration,
+  status, alertmanager and client-cache tests invoke them. Restored the
+  pre-v3.0 contract via a thread-safe `_mcp._ensure_registry()` that lazily
+  builds the registry from `PROMETHEUS_MCP_CONFIG` (federation) or the
+  `PROMETHEUS_*` env vars (v2.0 legacy mode) on first use. `get_registry()`
+  (federation/correlation tools) intentionally stays strict.
+- **Protocol contract test** (`test_protocol.py`) updated to include the four
+  v4.0 correlation/federation tools now registered by `server.py`, with their
+  annotations and parameter sets; renamed from `test_all_sixteen_tools_*`.
+- **Client-cache test** reset the removed `_client`/`_client_lock` globals;
+  updated to reset the renamed `_registry`/`_registry_lock`.
+- **Lint gate green.** Fixed repo-wide ruff findings that failed CI before
+  pytest even ran: bare `except:` → `except Exception:`, `zip(..., strict=...)`,
+  `raise ... from None`, F401 on the RCA availability-probe imports (now
+  `# noqa`), and removed two dead local assignments.
+
 ## [0.4.1] — 2026-07-07
 
 ### Fixed

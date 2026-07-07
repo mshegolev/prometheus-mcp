@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
 
-from prometheus_mcp.config import FederationConfig, InstanceConfig, load_config
+from prometheus_mcp.config import load_config
 from prometheus_mcp.errors import ConfigError
 from prometheus_mcp.registry import InstanceRegistry
-
-
-import json
 
 
 def _write_config(tmp_path: Path, data: dict[str, Any]) -> str:

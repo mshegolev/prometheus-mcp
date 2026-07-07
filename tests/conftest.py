@@ -7,7 +7,6 @@ ensures consistent cleanup between test runs.
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Generator
 
 import pytest

@@ -62,6 +62,32 @@ async def app_lifespan(_app: FastMCP) -> AsyncIterator[dict[str, Any]]:
 mcp = FastMCP("prometheus_mcp", lifespan=app_lifespan)
 
 
+def _ensure_registry() -> InstanceRegistry:
+    """Return the process-global registry, lazily building it on first use.
+
+    In production the registry is created eagerly by :func:`app_lifespan`.
+    When tool functions are invoked directly — in tests, or before the server
+    lifespan has run — ``_registry`` is still ``None``; we build it here using
+    the same rules as startup: load ``PROMETHEUS_MCP_CONFIG`` if set
+    (federation mode), otherwise ``None`` for v2.0 legacy mode, where clients
+    read their endpoint/auth from ``PROMETHEUS_*`` / ``ALERTMANAGER_*`` env
+    vars on first access.
+
+    This restores the pre-v3.0 ``get_client`` contract (thread-safe lazy-init
+    from the environment) that the federation refactor accidentally dropped.
+
+    Thread-safe via double-checked locking on ``_registry_lock``.
+    """
+    global _registry
+    if _registry is None:
+        with _registry_lock:
+            if _registry is None:
+                config_path = os.environ.get("PROMETHEUS_MCP_CONFIG")
+                config = load_config(config_path) if config_path else None
+                _registry = InstanceRegistry(config)
+    return _registry
+
+
 def get_registry() -> InstanceRegistry:
     """Return the live :class:`InstanceRegistry`.
 
@@ -69,6 +95,11 @@ def get_registry() -> InstanceRegistry:
     module-global ``_registry`` by value: ``_registry`` is ``None`` at import
     and only assigned during :func:`app_lifespan` startup, so a captured
     ``from _mcp import _registry`` binding stays frozen at ``None`` forever.
+
+    Unlike :func:`get_client`, this does NOT lazily build a registry: the
+    federation/correlation tools that use it require a genuinely initialized
+    multi-instance registry (from ``app_lifespan`` or an explicit test mock),
+    not a best-effort legacy default synthesized from env vars.
 
     Raises:
         RuntimeError: If the registry has not been initialized (app not started).
@@ -90,14 +121,8 @@ def get_client(instance: str | None = None) -> PrometheusClient:
     Raises:
         ConfigError: If instance name is unknown or has no Prometheus URL.
     """
-    global _registry
-    if _registry is None:
-        raise RuntimeError("Registry not initialized - app not started")
-
-    if instance is None:
-        return _registry.get_prometheus_client("default")
-    else:
-        return _registry.get_prometheus_client(instance)
+    registry = _ensure_registry()
+    return registry.get_prometheus_client("default" if instance is None else instance)
 
 
 def get_alertmanager_client(instance: str | None = None) -> AlertmanagerClient:
@@ -112,11 +137,5 @@ def get_alertmanager_client(instance: str | None = None) -> AlertmanagerClient:
     Raises:
         ConfigError: If instance name is unknown or has no Alertmanager URL.
     """
-    global _registry
-    if _registry is None:
-        raise RuntimeError("Registry not initialized - app not started")
-
-    if instance is None:
-        return _registry.get_alertmanager_client("default")
-    else:
-        return _registry.get_alertmanager_client(instance)
+    registry = _ensure_registry()
+    return registry.get_alertmanager_client("default" if instance is None else instance)

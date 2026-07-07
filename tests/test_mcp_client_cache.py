@@ -36,8 +36,10 @@ def test_get_client_raises_on_missing_config(monkeypatch: pytest.MonkeyPatch) ->
 def test_cache_rebuilds_after_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMETHEUS_URL", "https://prometheus.example.com")
     first = _mcp.get_client()
-    with _mcp._client_lock:
-        _mcp._client = None
+    # Reset the process-global registry (renamed from the pre-v3.0 ``_client``
+    # cache); the next get_client() must rebuild a fresh client from env.
+    with _mcp._registry_lock:
+        _mcp._registry = None
     second = _mcp.get_client()
     assert first is not second
 

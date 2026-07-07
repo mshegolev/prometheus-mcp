@@ -1,20 +1,17 @@
 """Tests for the trend analysis module."""
 
-import pytest
 from datetime import datetime
-from unittest.mock import Mock
 
 from prometheus_mcp.trend_analysis import (
-    PatternRecognizer,
+    DeviationDetector,
     ForecastingEngine,
     MTTRBenchmark,
-    DeviationDetector,
+    PatternRecognizer,
     RemediationSuggester,
     analyze_trends,
     benchmark_resolution_times,
     detect_deviations,
 )
-from prometheus_mcp.models import AlertItem, RangeSeries
 
 
 class TestPatternRecognizer:

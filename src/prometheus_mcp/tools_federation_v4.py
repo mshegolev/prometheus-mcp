@@ -6,29 +6,20 @@ dependency mapping, and trend analysis for comprehensive incident investigation.
 
 from __future__ import annotations
 
-from typing import Annotated, List, Optional
+from typing import Annotated
 
 from pydantic import Field
 
 from prometheus_mcp import output
 from prometheus_mcp._mcp import _registry, mcp
 from prometheus_mcp.correlation import CorrelationEngine
-from prometheus_mcp.rca import RCAEngine
 from prometheus_mcp.dependency import DependencyEngine
-from prometheus_mcp.trend_analysis import analyze_trends, benchmark_resolution_times
 from prometheus_mcp.models import (
-    AlertGroupResult,
-    AMAlertItem,
-    CascadeDetectionResult,
     CorrelationResult,
-    AnomalyDetectionResult,
-    DependencyTraversalResult,
-    ChangePointDetectionResult,
-    RootCauseRankingResult,
-    ListAlertsOutput,
     RangeSeries,
 )
-
+from prometheus_mcp.rca import RCAEngine
+from prometheus_mcp.trend_analysis import analyze_trends, benchmark_resolution_times
 
 # ── Federated Alert Analysis ─────────────────────────────────────────────────
 
@@ -45,13 +36,13 @@ from prometheus_mcp.models import (
 )
 def federation_analyze_alerts(
     instance_filter: Annotated[
-        Optional[List[str]],
+        list[str] | None,
         Field(
             description="Optional list of instance names to analyze. If omitted, all configured instances are analyzed."
         ),
     ] = None,
     alert_filter: Annotated[
-        Optional[str],
+        str | None,
         Field(description="Optional PromQL-style filter to select specific alerts by labels (e.g., 'job=~\"web.*\"')."),
     ] = None,
     analysis_depth: Annotated[
@@ -247,7 +238,7 @@ def federation_analyze_alerts(
         return output.fail(exc, "performing federated alert analysis")
 
 
-def _convert_query_result_to_rangeseries(query_result, instance_name: str, metric_name: str) -> List[RangeSeries]:
+def _convert_query_result_to_rangeseries(query_result, instance_name: str, metric_name: str) -> list[RangeSeries]:
     """Convert a query result to RangeSeries format for trend analysis."""
     rangeseries_list = []
 
@@ -279,13 +270,13 @@ def _convert_query_result_to_rangeseries(query_result, instance_name: str, metri
 
 
 def _generate_markdown_report(
-    clients: List[str],
+    clients: list[str],
     correlation_result: CorrelationResult,
-    rca_results: List[dict],
-    dependency_results: List[dict],
-    trend_analysis: Optional[dict],
-    benchmark_results: Optional[dict],
-    alert_filter: Optional[str],
+    rca_results: list[dict],
+    dependency_results: list[dict],
+    trend_analysis: dict | None,
+    benchmark_results: dict | None,
+    alert_filter: str | None,
 ) -> str:
     """Generate human-readable markdown report from analysis results."""
     report_lines = ["# Federated Alert Analysis Report", ""]
@@ -295,7 +286,8 @@ def _generate_markdown_report(
         [
             "## Analysis Summary",
             f"- **Instances Analyzed**: {', '.join(clients)}",
-            f"- **Total Alerts Found**: {len(correlation_result.groups) if correlation_result and correlation_result.groups else 0}",
+            f"- **Total Alerts Found**: "
+            f"{len(correlation_result.groups) if correlation_result and correlation_result.groups else 0}",
         ]
     )
 
@@ -315,7 +307,8 @@ def _generate_markdown_report(
                 [
                     f"### Group {i}: {len(group.alerts)} related alerts",
                     f"- **Correlation Strength**: {getattr(group, 'strength', 'N/A')}",
-                    f"- **Primary Alert**: {group.alerts[0].get('labels', {}).get('alertname', 'Unknown') if group.alerts else 'N/A'}",
+                    f"- **Primary Alert**: "
+                    f"{group.alerts[0].get('labels', {}).get('alertname', 'Unknown') if group.alerts else 'N/A'}",
                     "",
                 ]
             )

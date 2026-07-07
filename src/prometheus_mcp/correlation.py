@@ -14,12 +14,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from prometheus_mcp.models import (
-    AMAlertItem,
     AlertGroupResult,
+    AMAlertItem,
     CascadeDetectionResult,
-    CascadeRelationship,
-    CorrelatedAlert,
-    CorrelationGroup,
     CorrelationResult,
 )
 
@@ -226,7 +223,7 @@ class CorrelationEngine:
             try:
                 self.registry.get_alertmanager_client(name)
                 am_instance_names.append(name)
-            except:
+            except Exception:
                 pass
 
         # Collect alerts from all instances

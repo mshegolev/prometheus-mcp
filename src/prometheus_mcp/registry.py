@@ -246,7 +246,7 @@ class InstanceRegistry:
                     return client
                 except ConfigError:
                     # If Alertmanager URL is not configured, raise the appropriate error
-                    raise ConfigError(f"Instance {name!r} has no Alertmanager URL configured")
+                    raise ConfigError(f"Instance {name!r} has no Alertmanager URL configured") from None
             elif entry.alertmanager_client is None:
                 raise ConfigError(f"Instance {name!r} has no Alertmanager URL configured")
             return entry.alertmanager_client

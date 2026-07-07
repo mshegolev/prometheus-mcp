@@ -9,8 +9,8 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from prometheus_mcp.tools_correlation import (
     correlate_alerts_across_instances,
-    group_alerts_by_service,
     detect_cascading_alerts,
+    group_alerts_by_service,
 )
 
 

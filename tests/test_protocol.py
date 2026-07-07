@@ -20,6 +20,8 @@ import pytest
 # Importing tools attaches @mcp.tool decorators.
 import prometheus_mcp.tools  # noqa: F401
 import prometheus_mcp.tools_alertmanager  # noqa: F401
+import prometheus_mcp.tools_correlation  # noqa: F401
+import prometheus_mcp.tools_federation  # noqa: F401
 import prometheus_mcp.tools_status  # noqa: F401
 from prometheus_mcp._mcp import mcp
 
@@ -136,6 +138,43 @@ EXPECTED_TOOLS: dict[str, dict[str, Any]] = {
         "required_params": set(),
         "optional_params": set(),
     },
+    # ── v4.0 correlation / federation tools ──────────────────────────────────
+    "correlate_alerts_across_instances": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": {
+            "temporal_window",
+            "similarity_threshold",
+            "enable_rca",
+            "instance",
+            "instances",
+        },
+    },
+    "group_alerts_by_service": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": {"instance", "instances"},
+    },
+    "detect_cascading_alerts": {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": {"temporal_window", "instance", "instances"},
+    },
+    # federation_list_instances omits destructiveHint in its decorator, so the
+    # generated annotation leaves it unset (None).
+    "federation_list_instances": {
+        "readOnlyHint": True,
+        "destructiveHint": None,
+        "idempotentHint": True,
+        "required_params": set(),
+        "optional_params": set(),
+    },
 }
 
 
@@ -145,7 +184,7 @@ def listed_tools() -> list[Any]:
     return asyncio.run(mcp.list_tools())
 
 
-def test_all_sixteen_tools_registered(listed_tools: list[Any]) -> None:
+def test_all_tools_registered(listed_tools: list[Any]) -> None:
     names = {t.name for t in listed_tools}
     assert names == set(EXPECTED_TOOLS), (
         f"tool list mismatch.\n  registered: {sorted(names)}\n  expected:   {sorted(EXPECTED_TOOLS)}"
