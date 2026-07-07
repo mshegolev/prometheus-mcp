@@ -7,6 +7,8 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-07-07
+
 ### Fixed
 
 - **v4.0 correlation/federation tools were never registered.** `server.py`
