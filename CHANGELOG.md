@@ -7,6 +7,8 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-07-08
+
 ### Changed
 
 - **Flagged the unregistered v4 modules as EXPERIMENTAL.** `tools_federation_v4`,

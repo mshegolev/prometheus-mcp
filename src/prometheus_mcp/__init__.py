@@ -1,3 +1,3 @@
 """prometheus-mcp — MCP server for Prometheus metrics and observability."""
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
