@@ -7,6 +7,16 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Flagged the unregistered v4 modules as EXPERIMENTAL.** `tools_federation_v4`,
+  `dependency`, and `trend_analysis` are not imported by `server.py` and are
+  unreachable from any registered tool; large parts of `dependency`/`trend_analysis`
+  are simulated (mock probes, random failure marking, clock-based MTTR, empty
+  anomaly/recommendation lists). Each now carries a module-level warning that it
+  is not wired into the server and must not be exposed until the simulated paths
+  are backed by real data. No behaviour change — documentation only.
+
 ### Fixed
 
 - **RCA change-point detection no longer fabricates events.** With

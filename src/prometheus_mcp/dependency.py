@@ -7,6 +7,20 @@ Provides functionality for:
 - Synthetic health probing for dependency assessment
 - Real-time dependency state differentiation
 - Load shedding recommendations based on dependency fragility
+
+.. warning::
+
+    **EXPERIMENTAL — NOT WIRED INTO THE SERVER. CONTAINS SIMULATED LOGIC.**
+
+    Nothing registered on the server imports this module — its only consumer
+    is the (also-unregistered) ``tools_federation_v4`` module. Large parts of
+    it are SIMULATED rather than backed by real data: synthetic health probes
+    return mock results, state differentiation marks services failed with a
+    fixed random chance, anomaly/recommendation lists are returned empty, and
+    cluster/identity resolution uses placeholder heuristics (see the
+    ``# In a real implementation…`` / ``# For now, we'll simulate…`` comments
+    throughout). Do NOT expose any of this through a registered tool until the
+    simulated paths are replaced with real metric/traffic queries.
 """
 
 from __future__ import annotations

@@ -3,6 +3,17 @@
 This module provides functionality for historical pattern recognition,
 capacity forecasting, and MTTR benchmarking to give AI agents temporal
 context for incident investigation.
+
+.. warning::
+
+    **EXPERIMENTAL — NOT WIRED INTO THE SERVER. CONTAINS SIMULATED LOGIC.**
+
+    Nothing registered on the server imports this module. Parts of it are for
+    demonstration only — e.g. MTTR benchmarking simulates resolution times
+    from the current clock rather than using real resolution timestamps (see
+    the ``# For demonstration…`` / ``# In a real implementation…`` comments).
+    Do NOT expose this through a registered tool until those paths use real
+    historical data.
 """
 
 from __future__ import annotations

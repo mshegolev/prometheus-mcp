@@ -2,6 +2,20 @@
 
 Provides integrated tools that combine correlation, root cause analysis,
 dependency mapping, and trend analysis for comprehensive incident investigation.
+
+.. warning::
+
+    **EXPERIMENTAL — NOT WIRED INTO THE SERVER. DO NOT USE IN PRODUCTION.**
+
+    This module is intentionally NOT imported by ``server.py``, so its
+    ``federation_analyze_alerts`` tool is not registered or exposed. The
+    implementation references engine/client APIs that do not exist as written
+    (e.g. ``PrometheusClient.list_alerts``/``query``, ``output.warn``,
+    ``RCAEngine(clients)`` vs the real ``(registry)`` constructor,
+    ``registry.get_all_clients()``, ``CorrelationResult.dict()``) and will
+    crash on first call. It must be rewritten against the real APIs — and its
+    ``dependency`` backing (also experimental/simulated) made real — before it
+    can be registered. Kept for reference only.
 """
 
 from __future__ import annotations
