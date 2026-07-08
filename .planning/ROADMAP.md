@@ -1,11 +1,13 @@
-# Roadmap: prometheus-mcp v4.0
+# Roadmap: prometheus-mcp v4.0 + v5.0
 
 **Created:** 2026-06-18
-**Milestone:** v4.0 Advanced Alert Correlation
-**Phases:** 6
+**Last updated:** 2026-07-08 — v5.0 phases 14-18 added
+**Phases:** 11 total (8-13 complete, 14-18 active)
 **Granularity:** coarse
 
-## Phase Overview
+---
+
+## v4.0 Phase Overview
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
@@ -158,7 +160,7 @@ Plans:
 
 ---
 
-## Phase Completion
+## v4.0 Phase Completion
 
 All v4.0 phases are complete and shipped (released as v0.4.3 on PyPI).
 
@@ -170,9 +172,125 @@ All v4.0 phases are complete and shipped (released as v0.4.3 on PyPI).
 - [x] Phase 13: v4.0 Test & Release Prep (completed 2026-06-18)
 
 > Note: Phases 10 and 11 shipped simulated logic (flagged EXPERIMENTAL in code);
-> making them production-real is deferred to a future milestone. See STATE.md.
+> making them production-real is deferred to v5.0. See STATE.md.
+
+---
+
+## v5.0 Phase Overview
+
+**Milestone:** v5.0 Real Metric-Driven Intelligence
+**Goal:** Replace EXPERIMENTAL simulated modules with real Prometheus-native implementations, register all new tools on the server, and ship as v0.5.0.
+
+| # | Phase | Goal | Requirements | Success Criteria |
+|---|-------|------|--------------|------------------|
+| 14 | Real Dependency Mapping | Replace simulation with real traffic-metric dependency discovery; register tool | DEP-R01, DEP-R02 | 5 |
+| 15 | Metric-Driven Change Points | Replace stub with real `*_build_info`/`process_start_time_seconds` delta detection | RCA-R04 | 4 |
+| 16 | Real Trend Analysis & MTTR | Replace simulation with real `ALERTS` metric queries; register tool | TRE-R01, TRE-R02 | 5 |
+| 17 | Rewrite federation_analyze_alerts | Rewrite against real engine/client APIs; register on server | FED-R01 | 4 |
+| 18 | v5.0 Test, Verify & Release | VERIFICATION.md per phase, all tests green, version 0.5.0, PyPI release | QUAL-R01 | 5 |
+
+## Phase 14: Real Dependency Mapping
+
+**Goal:** Replace the EXPERIMENTAL simulated dependency module with a real implementation that queries live Prometheus traffic metrics carrying source/destination labels, and register `prometheus_map_service_dependencies` on the server.
+
+**Requirements:** DEP-R01, DEP-R02
+
+**Success Criteria:**
+1. `prometheus_map_service_dependencies` tool is registered in `server.py` and callable via MCP without error
+2. The tool issues a real `query_range` (or `query`) call against Prometheus for metrics carrying `source`/`destination` (or equivalent) labels — no mock data, no hardcoded graph
+3. The response contains a dependency graph (nodes = services, edges = traffic volume / error rate) in both markdown and structured JSON following the existing dual-channel output pattern
+4. The tool accepts `instance`, optional label matchers, and `time_window` parameters as specified in DEP-R02
+5. Unit tests verify the dependency graph construction logic against a mocked PrometheusClient response; the existing EXPERIMENTAL `dependency.py` stub is either replaced or clearly superseded
+
+**Dependencies:** Phase 13 (v4.0 complete), existing `PrometheusClient`, `InstanceRegistry`
+
+**UI hint:** no
+
+---
+
+## Phase 15: Metric-Driven Change Points
+
+**Goal:** Replace the change-point stub that previously returned empty results with a real implementation that detects service restarts and deployments by tracking `*_build_info` label-set changes and `process_start_time_seconds` jumps in Prometheus, and integrate the result into the existing `correlate_alerts_across_instances(enable_rca=True)` pipeline.
+
+**Requirements:** RCA-R04
+
+**Success Criteria:**
+1. Change-point detection queries real Prometheus metrics (`*_build_info` and/or `process_start_time_seconds`) via `query_range` — no fabricated events, no hardcoded timestamps
+2. A build-info label-set change (e.g., `version` label flip) is correctly identified as a deployment change point with the actual timestamp from the metric
+3. A `process_start_time_seconds` jump above a configurable threshold is correctly identified as a restart change point
+4. Change points detected are surfaced in the `correlate_alerts_across_instances(enable_rca=True)` output under the `change_points` key in structured JSON
+
+**Dependencies:** Phase 14, existing `RCAEngine`, `PrometheusClient`
+
+**UI hint:** no
+
+---
+
+## Phase 16: Real Trend Analysis & MTTR
+
+**Goal:** Replace the simulated trend analysis with a real implementation that queries the `ALERTS` metric via `query_range` to compute historical alert patterns and MTTR from actual alert-onset to alert-resolved transitions, and register `prometheus_trend_analysis` on the server.
+
+**Requirements:** TRE-R01, TRE-R02
+
+**Success Criteria:**
+1. Trend analysis engine issues a real `query_range` call for the `ALERTS` metric (or equivalent time-series) — no clock-based simulation, no synthetic data generation
+2. MTTR is computed from actual alert-onset to alert-resolved transitions detected in the time-series data, not estimated from constants
+3. The recurrence schedule (e.g., "fires every weekday at 09:00") is derived from observed firing timestamps in the `ALERTS` metric history
+4. `prometheus_trend_analysis` tool is registered in `server.py`, accepts `instance`, alert name filter, and lookback window parameters, and returns a trend report in markdown + structured JSON
+5. Unit tests mock a `query_range` response containing `ALERTS` series transitions and verify that MTTR, recurrence, and avg duration fields are computed correctly
+
+**Dependencies:** Phase 15, existing `PrometheusClient`, `InstanceRegistry`
+
+**UI hint:** no
+
+---
+
+## Phase 17: Rewrite federation_analyze_alerts
+
+**Goal:** Rewrite `federation_analyze_alerts` to use the real `InstanceRegistry`, `CorrelationEngine`, `RCAEngine`, and `PrometheusClient` APIs (replacing the EXPERIMENTAL `tools_federation_v4.py` stub that references non-existent APIs), and register the tool on `server.py` so it is reachable via MCP.
+
+**Requirements:** FED-R01
+
+**Success Criteria:**
+1. `federation_analyze_alerts` is registered in `server.py` and executes end-to-end without `AttributeError` or `NotImplementedError` — the EXPERIMENTAL `tools_federation_v4.py` is no longer the active implementation
+2. The tool pipeline covers: fetch alerts from all instances via `InstanceRegistry` → correlate via `CorrelationEngine` → optional RCA via `RCAEngine` → dependency context via Phase 14 mapper → trend summary via Phase 16 engine → unified markdown + JSON output
+3. The tool returns structured JSON with keys `correlated_groups`, `change_points` (if `enable_rca=True`), `dependency_context`, and `trend_summary`
+4. An integration test drives the full pipeline with mocked clients and verifies the output schema matches the structured JSON contract
+
+**Dependencies:** Phases 14, 15, 16; `CorrelationEngine`, `RCAEngine`, `InstanceRegistry`
+
+**UI hint:** no
+
+---
+
+## Phase 18: v5.0 Test, Verify & Release
+
+**Goal:** Produce a VERIFICATION.md for each v5.0 phase, ensure all tests pass with zero ruff errors, bump the version to 0.5.0, update CHANGELOG.md, and release to PyPI via CI.
+
+**Requirements:** QUAL-R01
+
+**Success Criteria:**
+1. A `VERIFICATION.md` file exists for each of Phases 14-17, documenting what was implemented, how it was tested, and what observable evidence confirms the phase success criteria are met
+2. `pytest -q` exits 0 with all tests green across Python 3.10, 3.11, and 3.12 (no skips hiding failures)
+3. `ruff check .` exits 0 with zero errors on the full codebase
+4. Version is bumped to `0.5.0` in `pyproject.toml` and `src/prometheus_mcp/__init__.py`; `CHANGELOG.md` has a `## [0.5.0]` section listing all v5.0 changes
+5. The `0.5.0` package is published to PyPI (or a CI release workflow is triggered and completes successfully); the EXPERIMENTAL flags are removed from the modules that are now production-real
+
+**Dependencies:** Phases 14-17
+
+**UI hint:** no
+
+---
+
+## v5.0 Phase Completion
+
+- [ ] Phase 14: Real Dependency Mapping
+- [ ] Phase 15: Metric-Driven Change Points
+- [ ] Phase 16: Real Trend Analysis & MTTR
+- [ ] Phase 17: Rewrite federation_analyze_alerts
+- [ ] Phase 18: v5.0 Test, Verify & Release
 
 ---
 
 *Roadmap created: 2026-06-18*
-*Last updated: 2026-07-08 — phase-completion markers added; artifacts reconciled with released reality*
+*Last updated: 2026-07-08 — v5.0 phases 14-18 added (milestone: Real Metric-Driven Intelligence)*

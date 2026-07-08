@@ -8,16 +8,16 @@ An MCP server that gives AI agents (Claude, Cursor, CI pipelines) read-only acce
 
 AI agents can autonomously investigate production errors and infrastructure issues by querying Prometheus metrics, metadata, labels, alerts, targets, rules, cardinality, and Alertmanager state — without human intervention or direct API knowledge.
 
-## Current Milestone: v4.0 Advanced Alert Correlation
+## Current Milestone: v5.0 Real Metric-Driven Intelligence
 
-**Goal:** Enable AI agents to perform sophisticated alert analysis across federated Prometheus instances, identifying root causes, correlating related alerts, and detecting complex failure patterns that span multiple services, clusters, and regions.
+**Goal:** Replace the EXPERIMENTAL simulated modules (dependency.py, trend_analysis.py, change-point detection) with real Prometheus-native implementations backed by actual metric data, register their tools on the server, and rewrite federation_analyze_alerts against the real engine/client APIs.
 
 **Target features:**
-- Cross-instance alert correlation engine
-- Root cause analysis for cascading failures
-- Alert grouping and pattern recognition across clusters
-- Dependency mapping between services based on metric correlations
-- Enhanced alert context with historical trend analysis
+- Real dependency mapping from traffic/request Prometheus metrics with source/dest labels
+- Real change-point detection from `*_build_info` / `process_start_time_seconds` deltas
+- Real trend analysis and MTTR from `ALERTS` metric via `query_range`
+- `federation_analyze_alerts` rewritten against real engine/client APIs and registered
+- All new tools registered on server, tested, and released as v0.5.0
 
 ## Requirements
 
@@ -51,13 +51,13 @@ AI agents can autonomously investigate production errors and infrastructure issu
 - ✓ Optional instance parameter added to existing tools for targeted queries
 - ✓ Alertmanager federation (multiple AM instances mapped to clusters)
 
-### Active
+### Active (v5.0)
 
-- [ ] Cross-instance alert correlation engine for identifying related alerts across clusters
-- [ ] Root cause analysis tools for cascading failure detection
-- [ ] Alert grouping based on service dependencies and metric correlations
-- [ ] Historical trend analysis for alert context enrichment
-- [ ] Dependency mapping between services using metric correlation patterns
+- [ ] Real dependency mapping from traffic metrics with source/dest labels — `prometheus_map_service_dependencies` tool
+- [ ] Real change-point detection using `*_build_info` / `process_start_time_seconds` metric deltas
+- [ ] Real trend analysis + MTTR from `ALERTS` metric via `query_range` — `prometheus_trend_analysis` tool
+- [ ] `federation_analyze_alerts` rewritten against real CorrelationEngine/PrometheusClient APIs, registered on server
+- [ ] All new tools tested (unit + integration) and releasing as v0.5.0
 
 ### Out of Scope
 
@@ -113,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-18 after milestone v4.0 start*
+*Last updated: 2026-07-08 after milestone v5.0 start*

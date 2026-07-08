@@ -3,6 +3,33 @@
 **Defined:** 2026-06-08
 **Core Value:** AI agents can autonomously investigate production errors by querying Prometheus metrics, metadata, labels, alerts, targets, rules, cardinality, and Alertmanager state — across multiple instances
 
+## v5.0 Requirements (Active)
+
+Requirements for milestone v5.0: Real Metric-Driven Intelligence.
+Carries forward the v4.0 deferred debt — DEP/TRE/RCA-03/FED shipped as simulation in v4.0.
+
+### Dependency Mapping (Real)
+
+- [ ] **DEP-R01**: AI agent can discover service-to-service dependencies from live Prometheus traffic/request metrics that carry `source`/`destination` (or equivalent) labels — no simulation, no mock probes
+- [ ] **DEP-R02**: `prometheus_map_service_dependencies` tool registered on server; accepts `instance`, optional label matchers, and time window; returns a dependency graph (nodes = services, edges = traffic volume / error rate) in markdown + structured JSON
+
+### Root Cause Analysis — Change Points (Real)
+
+- [ ] **RCA-R04**: Change-point detection backed by real Prometheus metric deltas — `*_build_info` label-set changes and `process_start_time_seconds` jumps identify restarts/deployments; replaces the stub that previously returned an empty result; integrated into `correlate_alerts_across_instances(enable_rca=True)` pipeline
+
+### Trend Analysis & MTTR (Real)
+
+- [ ] **TRE-R01**: Trend analysis engine queries `ALERTS` metric via `query_range` to compute real historical alert patterns, recurrence schedules, and approximate MTTR from alert-onset to alert-resolved transitions — no clock-based simulation
+- [ ] **TRE-R02**: `prometheus_trend_analysis` tool registered on server; accepts `instance`, alert name filter, lookback window; returns trend report (recurrence, avg duration, MTTR estimate) in markdown + structured JSON
+
+### Federation Analyze Alerts (Real)
+
+- [ ] **FED-R01**: `federation_analyze_alerts` tool rewritten against real APIs (`InstanceRegistry`, `CorrelationEngine`, `RCAEngine(registry)`, FastMCP output conventions); registered on `server.py`; replaces EXPERIMENTAL `tools_federation_v4.py` stub; end-to-end flow: fetch alerts → correlate → optional RCA → dependency context → trend summary → unified output
+
+### Quality & Release
+
+- [ ] **QUAL-R01**: Every v5.0 phase has a VERIFICATION.md before being marked complete; all tests pass (`pytest -q` green, 0 ruff errors); version bumped to 0.5.0; released to PyPI via CI; `CHANGELOG.md` updated
+
 ## v4.0 Requirements
 
 Requirements for milestone v4.0: Advanced Alert Correlation.
@@ -146,17 +173,22 @@ Deferred beyond v4.0.
 | DEP-01 | TBD | Pending |
 | DEP-02 | TBD | Pending |
 | DEP-03 | TBD | Pending |
-| TRE-01 | TBD | Pending |
-| TRE-02 | TBD | Pending |
-| TRE-03 | TBD | Pending |
+| TRE-01 | TBD | ⚠ Simulation in v4.0 |
+| TRE-02 | TBD | ⚠ Simulation in v4.0 |
+| TRE-03 | TBD | ⚠ Simulation in v4.0 |
+| DEP-R01 | 14 | ○ Pending (v5.0) |
+| DEP-R02 | 14 | ○ Pending (v5.0) |
+| RCA-R04 | 15 | ○ Pending (v5.0) |
+| TRE-R01 | 16 | ○ Pending (v5.0) |
+| TRE-R02 | 16 | ○ Pending (v5.0) |
+| FED-R01 | 17 | ○ Pending (v5.0) |
+| QUAL-R01 | 18 | ○ Pending (v5.0) |
 
 **Coverage:**
-- v3.0 requirements: 21 total
-- v3.0 completed: 21
-- v4.0 requirements: 12 total
-- Mapped to phases: 0
-- Unmapped: 12 (roadmap not yet created)
+- v3.0 requirements: 21 total, 21 completed
+- v4.0 requirements: 12 total (COR satisfied; RCA-01/02 partial; DEP/TRE/RCA-03 simulation)
+- v5.0 requirements: 7 total, 0 completed
 
 ---
 *Requirements defined: 2026-06-08*
-*Last updated: 2026-06-18 after v4.0 scoping*
+*Last updated: 2026-07-08 after v5.0 scoping (DEP/TRE/RCA-03/FED carried from v4.0 debt)*
