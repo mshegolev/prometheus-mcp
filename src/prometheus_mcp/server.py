@@ -7,6 +7,7 @@ from __future__ import annotations
 from prometheus_mcp import tools as _tools  # noqa: F401
 from prometheus_mcp import tools_alertmanager as _tools_am  # noqa: F401
 from prometheus_mcp import tools_correlation as _tools_corr  # noqa: F401
+from prometheus_mcp import tools_dependency as _tools_dep  # noqa: F401
 from prometheus_mcp import tools_federation as _tools_fed  # noqa: F401
 from prometheus_mcp import tools_status as _tools_status  # noqa: F401
 from prometheus_mcp._mcp import app_lifespan, mcp

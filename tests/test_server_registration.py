@@ -40,6 +40,8 @@ EXPECTED_TOOLS = {
     "correlate_alerts_across_instances",
     "group_alerts_by_service",
     "detect_cascading_alerts",
+    # Dependency mapping (tools_dependency.py) — v5.0 Phase 14
+    "prometheus_map_service_dependencies",
     # Federation (tools_federation.py)
     "federation_list_instances",
 }

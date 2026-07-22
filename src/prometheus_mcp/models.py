@@ -683,3 +683,76 @@ class ListInstancesOutput(TypedDict):
     instances: list[FederationInstanceItem]
     federation_enabled: bool
     total_count: int
+
+
+# ── Real service dependency mapping (v5.0 Phase 14) ─────────────────────────
+#
+# These types back ``prometheus_map_service_dependencies`` — a REAL,
+# ``query_range``-driven dependency map (DEP-R01/DEP-R02). They are
+# deliberately separate from the EXPERIMENTAL ``ServiceNode``/``DependencyEdge``
+# shapes above, which carry simulation-oriented fields (health probes, layout
+# coordinates, load-shedding). Nothing here is simulated: every node and edge
+# is derived from live Prometheus series carrying source/destination labels.
+
+
+class DependencyMapNode(TypedDict):
+    """A service participating in the dependency map.
+
+    Attributes:
+        service_id: Service identifier (the source/destination label value).
+        in_degree: Number of distinct upstream callers observed.
+        out_degree: Number of distinct downstream dependencies observed.
+    """
+
+    service_id: str
+    in_degree: int
+    out_degree: int
+
+
+class DependencyMapEdge(TypedDict):
+    """A directed source→destination dependency backed by real traffic metrics.
+
+    Attributes:
+        source: Calling service (source label value).
+        target: Called service (destination label value).
+        throughput: Mean request rate over the window (req/s), from the metric.
+        sample_count: Number of non-null data points observed for the edge.
+        error_rate: Fraction of traffic matching the error selector (0.0-1.0),
+            or ``None`` when no ``error_matcher`` was supplied.
+    """
+
+    source: str
+    target: str
+    throughput: float
+    sample_count: int
+    error_rate: float | None
+
+
+class ServiceDependencyMapResult(TypedDict):
+    """Structured output for ``prometheus_map_service_dependencies``.
+
+    Attributes:
+        metric: Traffic metric the map was built from.
+        source_label: Label used as the edge source.
+        destination_label: Label used as the edge target.
+        time_window: Look-back window (e.g. "5m").
+        step: Query resolution step.
+        instance: Target instance name (None = default).
+        error_matcher: Error selector used for error-rate edges (None if unset).
+        node_count: Number of distinct services (nodes).
+        edge_count: Number of directed dependency edges.
+        nodes: The service nodes.
+        edges: The directed dependency edges, sorted by throughput desc.
+    """
+
+    metric: str
+    source_label: str
+    destination_label: str
+    time_window: str
+    step: str
+    instance: str | None
+    error_matcher: str | None
+    node_count: int
+    edge_count: int
+    nodes: list[DependencyMapNode]
+    edges: list[DependencyMapEdge]
