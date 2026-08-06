@@ -7,6 +7,37 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-07
+
+### Added
+
+- **`prometheus_map_service_dependencies` — a real, `query_range`-backed service
+  dependency map** (v5.0 Phase 14, DEP-R01/DEP-R02). Registered on the server via
+  the new `tools_dependency` module and implemented in `dependency_map`. Every
+  node and edge is derived from live Prometheus series carrying source/destination
+  labels: edge throughput is the mean request rate over the window, `sample_count`
+  the number of non-null points, and `error_rate` is computed only when an
+  `error_matcher` is supplied (otherwise `None` rather than a guess). This is
+  deliberately separate from the EXPERIMENTAL `dependency` module, whose
+  health probes and state differentiation are still simulated.
+- **Public result types for the map**: `DependencyMapNode`, `DependencyMapEdge`
+  and `ServiceDependencyMapResult` in `models`.
+
+### Fixed
+
+- **`mcp` dependency is now capped below 2.0.** mcp 2.0 removed
+  `mcp.server.fastmcp`, which every tool module imports, so an unpinned
+  `pip install prometheus-mcp` resolved to a version that fails at import time.
+  `uv.lock` had been masking this locally. The cap lifts once the server is
+  ported to the 2.x API.
+- **`server.json` version had drifted** to a stale `0.2.0` and is now kept in
+  step with `pyproject.toml` / `__version__` (all four spots are updated
+  together for this release).
+
+### Housekeeping
+
+- `dependency_map` reformatted to satisfy `ruff format --check` (whitespace only).
+
 ## [0.4.3] — 2026-07-08
 
 ### Changed
