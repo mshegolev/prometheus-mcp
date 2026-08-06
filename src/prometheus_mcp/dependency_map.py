@@ -168,9 +168,7 @@ class ServiceDependencyMapper:
         error_by_edge: dict[tuple[str, str], float] = {}
         if error_matcher:
             error_selector = _build_selector(matchers, extra=error_matcher)
-            error_expr = (
-                f"sum by ({source_label}, {destination_label}) (rate({metric}{error_selector}[{time_window}]))"
-            )
+            error_expr = f"sum by ({source_label}, {destination_label}) (rate({metric}{error_selector}[{time_window}]))"
             for edge, (throughput, _count) in self._query_edges(
                 error_expr, source_label, destination_label, start, end, step
             ).items():
