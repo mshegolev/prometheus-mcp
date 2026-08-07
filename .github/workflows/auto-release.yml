@@ -32,61 +32,30 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install hatch tomli
+      # The carriers must already agree before we touch anything: a release
+      # started from a drifted tree would just propagate the drift.
+      - name: Verify version carriers are in sync
+        run: python scripts/bump_version.py --check
 
-      - name: Get current version
-        id: current_version
-        run: |
-          VERSION=$(python -c "import tomli; f=open('pyproject.toml','rb'); data=tomli.load(f); print(data['project']['version'])")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Calculate new version
+      # One tool bumps every carrier (pyproject.toml, __init__.py, and BOTH
+      # version fields of server.json). It edits only the version line/field —
+      # the __init__ module docstring and the whole of server.json survive.
+      - name: Bump version in all carriers
         id: new_version
+        env:
+          BUMP_TYPE: ${{ github.event.inputs.version_bump }}
         run: |
-          CURRENT_VERSION=${{ steps.current_version.outputs.version }}
-          BUMP_TYPE=${{ github.event.inputs.version_bump }}
-          
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          MAJOR=${VERSION_PARTS[0]}
-          MINOR=${VERSION_PARTS[1]}
-          PATCH=${VERSION_PARTS[2]}
-          
-          case $BUMP_TYPE in
-            "major")
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-              ;;
-            "minor")
-              MINOR=$((MINOR + 1))
-              PATCH=0
-              ;;
-            "patch"|*)
-              PATCH=$((PATCH + 1))
-              ;;
-          esac
-          
-          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          NEW_VERSION=$(python scripts/bump_version.py --bump "$BUMP_TYPE" --quiet)
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Update version in pyproject.toml
-        run: |
-          NEW_VERSION=${{ steps.new_version.outputs.version }}
-          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" pyproject.toml
-
-      - name: Update version in __init__.py
-        run: |
-          NEW_VERSION=${{ steps.new_version.outputs.version }}
-          echo "__version__ = '$NEW_VERSION'" > src/prometheus_mcp/__init__.py
+      - name: Verify the bump landed everywhere
+        run: python scripts/bump_version.py --check
 
       - name: Create release commit
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add pyproject.toml src/prometheus_mcp/__init__.py
+          git add pyproject.toml src/prometheus_mcp/__init__.py server.json
           git commit -m "Bump version to ${{ steps.new_version.outputs.version }}"
           git tag -a "v${{ steps.new_version.outputs.version }}" -m "Release version ${{ steps.new_version.outputs.version }}"
 

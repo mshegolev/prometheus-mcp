@@ -75,44 +75,29 @@ if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
     exit 1
 fi
 
-# Get current version from pyproject.toml
-CURRENT_VERSION=$(grep -E '^version = "' pyproject.toml | cut -d'"' -f2)
+# Locate the repo root so the bumper works no matter where this is invoked from
+REPO_ROOT=$(git rev-parse --show-toplevel)
+BUMP="$REPO_ROOT/scripts/bump_version.py"
+
+# All version carriers must agree before we start, otherwise the release just
+# propagates an existing drift (server.json sat at 0.2.0 for a month this way).
+echo "🔎 Checking version carriers are in sync..."
+CURRENT_VERSION=$(python3 "$BUMP" --check)
 echo "Current version: $CURRENT_VERSION"
 
-# Function to bump version (simple patch version bump)
-bump_version() {
-    local version=$1
-    local major minor patch
-    
-    # Split version into parts
-    IFS='.' read -ra VERSION_PARTS <<< "$version"
-    major=${VERSION_PARTS[0]}
-    minor=${VERSION_PARTS[1]}
-    patch=${VERSION_PARTS[2]}
-    
-    # Increment patch version
-    patch=$((patch + 1))
-    
-    echo "${major}.${minor}.${patch}"
-}
-
-# Bump version
-NEW_VERSION=$(bump_version $CURRENT_VERSION)
+# Bump every carrier at once: pyproject.toml, src/prometheus_mcp/__init__.py and
+# BOTH version fields of server.json. Only the version line/field is rewritten,
+# so the __init__ module docstring and the rest of server.json are preserved.
+echo "📝 Bumping version in pyproject.toml, __init__.py and server.json..."
+NEW_VERSION=$(python3 "$BUMP" --bump patch --quiet)
 echo "New version: $NEW_VERSION"
 
-# Update version in pyproject.toml
-echo "📝 Updating version in pyproject.toml..."
-sed -i.bak "s/version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" pyproject.toml
-rm pyproject.toml.bak
-
-# Update version in __init__.py if it exists there
-if [ -f "src/prometheus_mcp/__init__.py" ]; then
-    echo "__version__ = \"$NEW_VERSION\"" > src/prometheus_mcp/__init__.py
-fi
+# Re-check: a partially applied bump must not reach a tag.
+python3 "$BUMP" --check > /dev/null
 
 # Create new commit with version bump
 echo "💾 Committing version bump..."
-git add pyproject.toml src/prometheus_mcp/__init__.py
+git add pyproject.toml src/prometheus_mcp/__init__.py server.json
 git commit -m "Bump version to $NEW_VERSION"
 
 # Create tag
