@@ -7,6 +7,30 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The release tooling no longer destroys `src/prometheus_mcp/__init__.py`.**
+  Both `scripts/release.sh` and the `Auto Release` workflow overwrote the whole
+  file with a single `__version__` line (`echo "__version__ = '$V'" > …`), which
+  deleted the module docstring and would delete any re-export or `__all__` added
+  later. The version line is now replaced in place by regex; everything else in
+  the module is preserved.
+- **`server.json` is bumped together with the other carriers.** Neither release
+  path touched it, which is why it silently lagged at `0.2.0` for a month before
+  being fixed by hand in a4531d5. Both of its `version` fields — top-level and
+  the PyPI package entry — are now updated as parsed JSON, not by `sed`.
+
+### Added
+
+- `scripts/bump_version.py` — the single bumper used by both release paths.
+  Surgical (only the version line/field changes), idempotent (re-running with the
+  same target is a no-op), and offers `--check`, which exits non-zero when the
+  four version carriers disagree. Both release paths `--check` before and after
+  bumping, so a partially applied bump can never reach a tag.
+- `tests/test_version_sync.py` — 14 tests that turn version drift into a red
+  build and exercise the bumper against throwaway copies of the real files.
+- CI now lints `scripts/` alongside `src` and `tests`.
+
 ## [0.5.0] — 2026-08-07
 
 ### Added
