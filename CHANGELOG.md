@@ -7,6 +7,10 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-29
+
+No package code changes; release tooling only.
+
 ### Fixed
 
 - **The release tooling no longer destroys `src/prometheus_mcp/__init__.py`.**
