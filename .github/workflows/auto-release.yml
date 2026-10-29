@@ -16,6 +16,7 @@ on:
 permissions:
   contents: write
   packages: write
+  actions: write
 
 jobs:
   release:
@@ -73,3 +74,11 @@ jobs:
           release_name: Release ${{ steps.new_version.outputs.version }}
           draft: false
           prerelease: false
+
+      # Events caused by GITHUB_TOKEN (the tag push above) do not trigger other
+      # workflows, so start the PyPI publish explicitly on the new tag.
+      # Same workflow file + `pypi` environment, so Trusted Publisher still matches.
+      - name: Trigger PyPI publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run publish.yml --ref "v${{ steps.new_version.outputs.version }}"

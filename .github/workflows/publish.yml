@@ -7,6 +7,10 @@ on:
   push:
     tags:
       - "v*"
+  # Tags pushed by auto-release.yml with GITHUB_TOKEN do not fire the push
+  # trigger above (GitHub suppresses events caused by GITHUB_TOKEN), so that
+  # workflow dispatches this one explicitly with --ref <tag>.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,6 +33,10 @@ jobs:
 
       - name: Verify tag matches package version
         run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "::error::Run this workflow on a v* tag ref, got $GITHUB_REF"; exit 1 ;;
+          esac
           TAG="${GITHUB_REF_NAME#v}"
           PKG=$(python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
           echo "tag=$TAG  pyproject.version=$PKG"
