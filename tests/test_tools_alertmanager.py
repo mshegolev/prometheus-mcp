@@ -67,6 +67,79 @@ def test_silences_empty() -> None:
     assert data["total_count"] == 0
 
 
+def test_silences_fan_out_merges_successful_instances(monkeypatch: pytest.MonkeyPatch) -> None:
+    from prometheus_mcp import _mcp, tools_alertmanager
+
+    first_client, second_client = object(), object()
+
+    class Registry:
+        def all_alertmanager_clients(self) -> list[object]:
+            return [first_client, second_client]
+
+        def list_instances(self) -> list[str]:
+            return ["us", "eu"]
+
+        def get_alertmanager_client(self, name: str) -> object:
+            if name == "us":
+                return first_client
+            if name == "eu":
+                return second_client
+            raise KeyError(name)
+
+    monkeypatch.setattr(_mcp, "_registry", Registry())
+    monkeypatch.setattr(
+        tools_alertmanager,
+        "fan_out_prometheus",
+        lambda *_args, **_kwargs: {
+            "successful_instances": ["us", "eu"],
+            "failed_instances": [],
+            "results_by_instance": {
+                "us": [{"id": "silence-us", "status": {"state": "active"}}],
+                "eu": [{"id": "silence-eu", "status": {"state": "pending"}}],
+            },
+        },
+    )
+
+    data = alertmanager_list_silences(instance="all").structuredContent
+
+    assert data["total_count"] == 2
+    assert {silence["id"] for silence in data["silences"]} == {"silence-us", "silence-eu"}
+    assert data["active_count"] == 1
+    assert data["pending_count"] == 1
+
+
+def test_silences_fan_out_reports_partial_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from prometheus_mcp import _mcp, tools_alertmanager
+
+    client = object()
+
+    class Registry:
+        def all_alertmanager_clients(self) -> list[object]:
+            return [client]
+
+        def list_instances(self) -> list[str]:
+            return ["us", "eu"]
+
+        def get_alertmanager_client(self, name: str) -> object:
+            if name == "us":
+                return client
+            raise KeyError(name)
+
+    monkeypatch.setattr(_mcp, "_registry", Registry())
+    monkeypatch.setattr(
+        tools_alertmanager,
+        "fan_out_prometheus",
+        lambda *_args, **_kwargs: {
+            "successful_instances": ["us"],
+            "failed_instances": [{"instance_name": "eu", "message": "connection refused"}],
+            "results_by_instance": {"us": [{"id": "silence-us", "status": {"state": "active"}}]},
+        },
+    )
+
+    with pytest.raises(ToolError, match="eu.*connection refused"):
+        alertmanager_list_silences(instance="all")
+
+
 @responses.activate
 def test_silences_401() -> None:
     responses.add(responses.GET, f"{AM_API}/silences", json={}, status=401)

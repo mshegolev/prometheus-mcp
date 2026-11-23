@@ -43,6 +43,17 @@ class TestFanOutPrometheus:
         assert result["failed_instances"] == []
         assert result["truncated"] is False
 
+    def test_preserves_successful_results_by_instance(self) -> None:
+        first = [{"id": "silence-1"}]
+        second = [{"id": "silence-2"}]
+        result = fan_out_prometheus(
+            lambda client: client.silences,
+            [Mock(silences=first), Mock(silences=second)],
+            instance_names=["us", "eu"],
+        )
+
+        assert result["results_by_instance"] == {"us": first, "eu": second}
+
     def test_instance_name_mismatch_raises(self) -> None:
         """fan_out_prometheus raises ValueError when instance_names length mismatches."""
         mock_client = Mock(spec=PrometheusClient)
