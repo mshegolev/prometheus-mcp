@@ -118,29 +118,25 @@ def alertmanager_list_silences(
             # Execute fan-out
             fan_out_result = fan_out_prometheus(query_func, clients, instance_names=client_names)
 
-            # For now, return results from first successful instance
-            # TODO: Implement proper merging of silences from multiple instances
+            failed_instances = fan_out_result["failed_instances"]
+            if failed_instances:
+                failures = "; ".join(
+                    f"{failure['instance_name']}: {failure['message']}" for failure in failed_instances
+                )
+                output.fail(
+                    Exception(f"Incomplete Alertmanager silence results ({failures})"),
+                    "listing Alertmanager silences",
+                )
+
             successful_instances = fan_out_result["successful_instances"]
             if successful_instances:
-                # Use results from first successful instance
-                raw_data = fan_out_result["data"]
-                if raw_data and len(raw_data) > 0:
-                    raw = raw_data[0] if isinstance(raw_data, list) else raw_data
-                else:
-                    raw = []
+                raw = [
+                    silence
+                    for name in successful_instances
+                    for silence in (fan_out_result["results_by_instance"].get(name) or [])
+                ]
             else:
-                # All instances failed
-                failed_instances = fan_out_result["failed_instances"]
-                if failed_instances:
-                    first_error = failed_instances[0]
-                    return output.fail(
-                        Exception(
-                            f"Alertmanager instance {first_error['instance_name']} failed: {first_error['message']}"
-                        ),
-                        "listing Alertmanager silences",
-                    )
-                else:
-                    raw = []
+                raw = []
         else:
             # Single instance case
             client = get_alertmanager_client(instance)

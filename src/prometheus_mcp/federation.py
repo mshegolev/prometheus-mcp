@@ -144,6 +144,7 @@ def fan_out_prometheus(
     if not clients:
         return {
             "data": None,
+            "results_by_instance": {},
             "successful_instances": [],
             "failed_instances": [],
             "truncated": False,
@@ -201,6 +202,7 @@ def fan_out_prometheus(
     # Return structured result
     return {
         "data": merged_data,
+        "results_by_instance": successful_results,
         "successful_instances": list(successful_results.keys()),
         "failed_instances": failed_instances,
         "truncated": truncated,
